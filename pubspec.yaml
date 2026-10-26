@@ -33,6 +33,9 @@ dependencies:
   intl: ^0.20.0 # date / time formatting
   uuid: ^4.0.0 # unique file names for persisted video copies
 
+  # --- Networking --------------------------------------------------------------
+  http: ^1.2.0 # WhatsApp agent client (Phase 3), API calls in later phases
+
   # --- Background execution (Phase 2) ----------------------------------------
   # Foreground service that fires uploads at the exact scheduled time.
   flutter_background_service: ^5.1.0

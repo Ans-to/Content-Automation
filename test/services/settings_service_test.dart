@@ -38,6 +38,7 @@ void main() {
         instagramBusinessAccountId: '178',
         whatsappEndpoint: 'https://a.example',
         whatsappApiKey: 'k',
+        whatsappRecipient: '923001234567',
       );
       expect(full.isYouTubeConfigured, isTrue);
       expect(full.isInstagramConfigured, isTrue);
@@ -83,6 +84,7 @@ void main() {
           youtubeClientId: ' cid ',
           whatsappEndpoint: 'https://agent.example.com',
           whatsappApiKey: 'secret',
+          whatsappRecipient: '923001234567',
         ),
       );
       expect(await store.read(SettingsKeys.youtubeClientId), 'cid');

@@ -44,6 +44,9 @@ class WatchdogTask {
       }
     }
 
+    // Catch up on WhatsApp "Status" requests between service runs.
+    await runtime.pollInbox();
+
     await runtime.statusStore.markWatchdogRun(_clock());
     debugPrint(
       'Watchdog($trigger): $plan, serviceRunning=$serviceRunning, '

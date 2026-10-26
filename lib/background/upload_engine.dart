@@ -302,7 +302,7 @@ class UploadEngine {
 
   Future<void> _notifyAgentStarting(ScheduledUpload upload) async {
     final id = upload.id!;
-    if (!_agent.isConfigured) {
+    if (!await _agent.isConfigured()) {
       await _repository.logEvent(
         id,
         'WhatsApp agent not configured — "Time reached" message skipped.',
@@ -326,7 +326,7 @@ class UploadEngine {
   }
 
   Future<void> _notifyAgentCompleted(ScheduledUpload upload) async {
-    if (!_agent.isConfigured) return;
+    if (!await _agent.isConfigured()) return;
     try {
       await _agent.notifyUploadCompleted(upload);
       await _repository.logEvent(upload.id!, 'WhatsApp: completion message sent.');
@@ -340,7 +340,7 @@ class UploadEngine {
   }
 
   Future<void> _notifyAgentFailure(ScheduledUpload upload, String error) async {
-    if (!_agent.isConfigured) return;
+    if (!await _agent.isConfigured()) return;
     try {
       await _agent.notifyUploadFailed(upload, error);
       await _repository.logEvent(upload.id!, 'WhatsApp: error message sent.');

@@ -1,8 +1,18 @@
+import 'dart:convert';
+
 import 'package:content_automation/background/watchdog_task.dart';
 import 'package:content_automation/data/models/enums.dart';
+import 'package:content_automation/integrations/whatsapp/inbox_cursor_store.dart';
+import 'package:content_automation/integrations/whatsapp/inbox_service.dart';
+import 'package:content_automation/integrations/whatsapp/whatsapp_client.dart';
+import 'package:content_automation/services/secure_key_value_store.dart';
+import 'package:content_automation/services/settings_service.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 
 import '../helpers/background_fakes.dart';
+import '../helpers/in_memory_schedule_repository.dart';
 
 void main() {
   test('nothing due: only stamps the watchdog run', () async {
@@ -71,5 +81,45 @@ void main() {
 
     expect((await h.repository.getById(created.id!))!.status, UploadStatus.failed);
     expect(h.bridge.serviceStartRequests, 0);
+  });
+
+  test('answers pending WhatsApp "Status" messages on the way', () async {
+    final requests = <http.Request>[];
+    final settings = SettingsService(
+      store: InMemoryKeyValueStore(),
+      buildDefaults: const AppSettings(
+        whatsappEndpoint: 'https://agent.example.com',
+        whatsappRecipient: '923001234567',
+      ),
+    );
+    final inbox = WhatsAppInboxService(
+      settingsService: settings,
+      repository: InMemoryScheduleRepository(),
+      client: WhatsAppHttpClient(
+        client: MockClient((request) async {
+          requests.add(request);
+          if (request.method == 'GET') {
+            return http.Response(
+              jsonEncode([
+                {'id': '1', 'from': '923001234567', 'text': 'Status'},
+              ]),
+              200,
+            );
+          }
+          return http.Response('{}', 200);
+        }),
+      ),
+      cursorStore: InMemoryInboxCursorStore(),
+      lock: InMemoryInboxLock(),
+    );
+    final h = EngineHarness(inbox: inbox);
+
+    await WatchdogTask(h.runtime, clock: h.clock.call).run(trigger: 'watchdog');
+
+    final post = requests.singleWhere((r) => r.method == 'POST');
+    final body = jsonDecode(post.body) as Map<String, dynamic>;
+    expect(body['event'], 'status_reply');
+    expect(body['text'], 'No uploads scheduled.');
+    expect(h.statusStore.status?.lastWatchdogRun, h.clock.now);
   });
 }

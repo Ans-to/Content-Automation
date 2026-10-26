@@ -16,6 +16,7 @@ abstract final class SettingsKeys {
   static const String whatsappEndpoint = 'whatsapp_agent_endpoint';
   static const String whatsappApiKey = 'whatsapp_agent_api_key';
   static const String whatsappRecipient = 'whatsapp_recipient_number';
+  static const String whatsappInboxUrl = 'whatsapp_agent_inbox_url';
 
   static const String ngrokAuthToken = 'ngrok_authtoken';
 
@@ -28,6 +29,7 @@ abstract final class SettingsKeys {
     whatsappEndpoint,
     whatsappApiKey,
     whatsappRecipient,
+    whatsappInboxUrl,
     ngrokAuthToken,
   ];
 }
@@ -44,6 +46,7 @@ class AppSettings {
     this.whatsappEndpoint = '',
     this.whatsappApiKey = '',
     this.whatsappRecipient = '',
+    this.whatsappInboxUrl = '',
     this.ngrokAuthToken = '',
   });
 
@@ -59,6 +62,7 @@ class AppSettings {
     whatsappEndpoint: Env.valueOrNull(Env.whatsappAgentEndpoint) ?? '',
     whatsappApiKey: Env.valueOrNull(Env.whatsappAgentApiKey) ?? '',
     whatsappRecipient: Env.valueOrNull(Env.whatsappRecipientNumber) ?? '',
+    whatsappInboxUrl: Env.valueOrNull(Env.whatsappAgentInboxUrl) ?? '',
     ngrokAuthToken: Env.valueOrNull(Env.ngrokAuthToken) ?? '',
   );
 
@@ -72,6 +76,7 @@ class AppSettings {
     whatsappEndpoint: map[SettingsKeys.whatsappEndpoint] ?? '',
     whatsappApiKey: map[SettingsKeys.whatsappApiKey] ?? '',
     whatsappRecipient: map[SettingsKeys.whatsappRecipient] ?? '',
+    whatsappInboxUrl: map[SettingsKeys.whatsappInboxUrl] ?? '',
     ngrokAuthToken: map[SettingsKeys.ngrokAuthToken] ?? '',
   );
 
@@ -89,6 +94,10 @@ class AppSettings {
   final String whatsappApiKey;
   final String whatsappRecipient;
 
+  /// Optional: where inbound messages are polled from when the agent does not
+  /// expose them under `{endpoint}/messages`.
+  final String whatsappInboxUrl;
+
   // Tunnel (Phase 5)
   final String ngrokAuthToken;
 
@@ -99,8 +108,10 @@ class AppSettings {
   bool get isInstagramConfigured =>
       instagramAccessToken.isNotEmpty && instagramBusinessAccountId.isNotEmpty;
 
+  /// Endpoint + recipient are required; the API key is optional for agents
+  /// that authenticate differently (e.g. private networks / IP allow-lists).
   bool get isWhatsAppConfigured =>
-      whatsappEndpoint.isNotEmpty && whatsappApiKey.isNotEmpty;
+      whatsappEndpoint.isNotEmpty && whatsappRecipient.isNotEmpty;
 
   bool get isTunnelConfigured => ngrokAuthToken.isNotEmpty;
 
@@ -115,6 +126,7 @@ class AppSettings {
     SettingsKeys.whatsappEndpoint: whatsappEndpoint,
     SettingsKeys.whatsappApiKey: whatsappApiKey,
     SettingsKeys.whatsappRecipient: whatsappRecipient,
+    SettingsKeys.whatsappInboxUrl: whatsappInboxUrl,
     SettingsKeys.ngrokAuthToken: ngrokAuthToken,
   };
 
@@ -141,6 +153,7 @@ class AppSettings {
     String? whatsappEndpoint,
     String? whatsappApiKey,
     String? whatsappRecipient,
+    String? whatsappInboxUrl,
     String? ngrokAuthToken,
   }) => AppSettings(
     youtubeClientId: youtubeClientId ?? this.youtubeClientId,
@@ -152,6 +165,7 @@ class AppSettings {
     whatsappEndpoint: whatsappEndpoint ?? this.whatsappEndpoint,
     whatsappApiKey: whatsappApiKey ?? this.whatsappApiKey,
     whatsappRecipient: whatsappRecipient ?? this.whatsappRecipient,
+    whatsappInboxUrl: whatsappInboxUrl ?? this.whatsappInboxUrl,
     ngrokAuthToken: ngrokAuthToken ?? this.ngrokAuthToken,
   );
 

@@ -3,11 +3,17 @@ import 'package:content_automation/background/background_coordinator.dart';
 import 'package:content_automation/background/scheduler_status.dart';
 import 'package:content_automation/data/models/enums.dart';
 import 'package:content_automation/data/models/scheduled_upload.dart';
+import 'package:content_automation/integrations/whatsapp/inbox_cursor_store.dart';
+import 'package:content_automation/integrations/whatsapp/whatsapp_agent.dart';
+import 'package:content_automation/integrations/whatsapp/whatsapp_client.dart';
 import 'package:content_automation/services/secure_key_value_store.dart';
 import 'package:content_automation/services/settings_service.dart';
 import 'package:content_automation/services/video_file_service.dart';
+import 'package:content_automation/state/whatsapp_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:platform_bridge/platform_bridge.dart';
 
 import '../helpers/in_memory_schedule_repository.dart';
@@ -17,17 +23,33 @@ void main() {
   late InMemoryKeyValueStore store;
   late InMemoryPlatformBridge bridge;
   late NoopBackgroundController background;
+  late List<http.Request> agentRequests;
 
-  Widget buildApp() => ContentAutomationApp(
-    repository: repository,
-    settingsService: SettingsService(
+  Widget buildApp() {
+    final settingsService = SettingsService(
       store: store,
       buildDefaults: const AppSettings(),
-    ),
-    videoFileService: VideoFileService(),
-    platformBridge: bridge,
-    backgroundController: background,
-  );
+    );
+    return ContentAutomationApp(
+      repository: repository,
+      settingsService: settingsService,
+      videoFileService: VideoFileService(),
+      platformBridge: bridge,
+      backgroundController: background,
+      whatsapp: WhatsAppProvider(
+        agent: HttpWhatsAppAgent(
+          settingsService: settingsService,
+          client: WhatsAppHttpClient(
+            client: MockClient((request) async {
+              agentRequests.add(request);
+              return http.Response('{"ok":true}', 200);
+            }),
+          ),
+        ),
+        cursorStore: InMemoryInboxCursorStore(),
+      ),
+    );
+  }
 
   setUp(() {
     repository = InMemoryScheduleRepository();
@@ -37,6 +59,7 @@ void main() {
       ..notificationsEnabled = true
       ..exactAlarmsAllowed = true;
     background = NoopBackgroundController();
+    agentRequests = [];
   });
 
   Future<void> useTallScreen(WidgetTester tester) async {
@@ -265,5 +288,62 @@ void main() {
 
     expect(find.text('Enter a full URL starting with https://'), findsOneWidget);
     expect(await store.read(SettingsKeys.whatsappEndpoint), isNull);
+  });
+
+  testWidgets('settings screen can send a WhatsApp test message', (
+    tester,
+  ) async {
+    await useTallScreen(tester);
+    await tester.pumpWidget(buildApp());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+
+    // Bring the WhatsApp section (one ListView child) on screen.
+    final endpointField = find.widgetWithText(TextFormField, 'Agent endpoint URL');
+    await tester.scrollUntilVisible(
+      endpointField,
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    final testButton = find.ancestor(
+      of: find.text('Send test message'),
+      matching: find.bySubtype<OutlinedButton>(),
+    );
+    OutlinedButton button() => tester.widget<OutlinedButton>(testButton);
+
+    // Nothing configured yet → disabled with a hint.
+    expect(button().onPressed, isNull);
+    expect(
+      find.text('Enter the endpoint and your number, then save.'),
+      findsOneWidget,
+    );
+
+    await tester.enterText(endpointField, 'https://agent.example.com/api');
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Your WhatsApp number'),
+      '923001234567',
+    );
+    await tester.pumpAndSettle();
+    // Unsaved edits → still disabled, different hint.
+    expect(button().onPressed, isNull);
+    expect(find.textContaining('Save first'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Save'));
+    await tester.pumpAndSettle();
+    expect(button().onPressed, isNotNull);
+
+    await tester.ensureVisible(testButton);
+    await tester.tap(testButton);
+    await tester.pumpAndSettle();
+
+    expect(agentRequests, hasLength(1));
+    expect(
+      agentRequests.single.url.toString(),
+      'https://agent.example.com/api/messages',
+    );
+    expect(agentRequests.single.body, contains('"event":"test"'));
+    expect(find.textContaining('Test message sent.'), findsOneWidget);
   });
 }

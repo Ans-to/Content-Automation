@@ -4,10 +4,11 @@ A **local-first Android app** (Flutter) that keeps your videos on the phone and,
 at the exact scheduled time, pings you on WhatsApp and uploads them to **YouTube**
 and **Instagram** — no server, no cloud queue, your keys never leave the device.
 
-> Status: **Phase 2 of 6 complete** — project setup, local database, the
-> Home / Add / Settings screens, and the background scheduler that fires at the
-> exact time with the app closed. Phases 3–6 (WhatsApp agent, YouTube +
-> Instagram uploaders, APK packaging docs) follow one by one.
+> Status: **Phase 3 of 6 complete** — project setup, local database, the
+> Home / Add / Settings screens, the background scheduler that fires at the
+> exact time with the app closed, and the WhatsApp agent integration (alerts +
+> "Status" replies). Phases 4–6 (YouTube + Instagram uploaders, APK packaging
+> docs) follow one by one.
 
 ## Build phases
 
@@ -15,7 +16,7 @@ and **Instagram** — no server, no cloud queue, your keys never leave the devic
 | ----- | ----- | ------ |
 | 1 | Flutter project, SQLite schedule DB, Home / Add / Settings UI, secure key storage | ✅ done |
 | 2 | Background scheduler (`flutter_background_service` + `workmanager`), battery-optimisation opt-out, failure handling | ✅ done |
-| 3 | WhatsApp Agent integration (outbound alerts + "Status" replies) | ⏳ |
+| 3 | WhatsApp Agent integration (outbound alerts + "Status" replies) | ✅ done |
 | 4 | YouTube Data API v3 resumable uploader (`googleapis` + `google_sign_in`) | ⏳ |
 | 5 | Instagram Graph API uploader via on-device `shelf` server + temporary tunnel | ⏳ |
 | 6 | Permissions, release APK workflow, full setup documentation | ⏳ |
@@ -55,7 +56,7 @@ awake at the exact minute**:
 2. **At the due time** the service claims the row (`scheduled → triggered`,
    atomic, so two isolates can never double-fire), logs *"Time reached"*, shows
    a local notification, calls the WhatsApp agent (*"Time reached. Starting
-   upload for [Title]."* — the HTTP client itself lands in Phase 3), checks the
+   upload for [Title]."*), checks the
    video is still on the device, and runs the YouTube / Instagram uploaders
    one after the other while writing progress to SQLite. Until Phases 4/5 ship
    their uploaders the placeholder ones **fail with a clear message**, so the
@@ -87,6 +88,141 @@ All platform-specific code lives in the app-local plugin
 permission checks and OEM settings intents. No third-party notification or
 permission packages are needed.
 
+## What Phase 3 adds: the WhatsApp agent
+
+The app never talks to WhatsApp directly — it talks to **your WhatsApp Agent**,
+a small HTTP bridge you host (a Node/Baileys script, a Twilio/360dialog/Meta
+Cloud API wrapper, n8n, …). Everything is configured in **Settings → WhatsApp
+Agent API**: *Agent endpoint URL*, *API key* (optional), *Your WhatsApp number*
+and an optional *Inbox URL*. A **Send test message** button verifies the setup.
+
+### Outbound: what the app sends
+
+| When | Message | `event` |
+| ---- | ------- | ------- |
+| Scheduled time reached | `Time reached. Starting upload for [Video Title].` | `upload_started` |
+| Any platform failed | `Upload failed for [Title].` + `YouTube: … \| Instagram: …` + `Reason: …` | `upload_failed` |
+| Everything succeeded | `Upload completed for [Title].` + status line + links/ids | `upload_completed` |
+| You asked "Status" | `YouTube: [Status] \| Instagram: [Status]` + context (see below) | `status_reply` |
+| Settings → Send test message | A greeting with the current time | `test` |
+
+Each message is a `POST {endpoint}/messages` (the `/messages` suffix is added
+unless the endpoint already ends with it):
+
+```http
+POST /api/messages
+Authorization: Bearer <API key>        # only when an API key is set
+X-API-Key: <API key>                    # same key, for bridges that prefer it
+Content-Type: application/json
+
+{
+  "to": "923001234567",
+  "type": "text",
+  "text": "Time reached. Starting upload for Launch teaser.",
+  "message": "Time reached. Starting upload for Launch teaser.",
+  "event": "upload_started",
+  "sent_at": "2026-10-26T13:00:00.000Z",
+  "upload": { "id": 7, "title": "Launch teaser", "platform": "both",
+              "status": "triggered", "youtube_status": "pending",
+              "instagram_status": "pending", "progress": 0.0,
+              "scheduled_time": "2026-10-26T13:00:00.000Z" }
+}
+```
+
+Any **2xx** response means "delivered to the agent". Pointing the endpoint at
+`https://graph.facebook.com/v<ver>/<phone-number-id>/messages` switches the
+client to the **Meta Cloud API** body (`messaging_product: whatsapp`, …) with
+the API key as bearer token — outbound only, because the Cloud API delivers
+incoming messages by webhook rather than polling.
+
+### Inbound: "Status"
+
+The phone has no public address, so the app **polls** the agent instead of
+receiving a webhook:
+
+```http
+GET /api/messages?since=2026-10-26T12:50:00.000Z&limit=50&from=923001234567
+Authorization: Bearer <API key>
+```
+
+The agent answers with the messages your number sent to it, newest or oldest
+first — a bare array or wrapped in `messages` / `data` / `items` / `results`:
+
+```json
+{ "messages": [
+  { "id": "m-1042", "from": "923001234567", "text": "Status",
+    "timestamp": "2026-10-26T12:58:41Z" }
+] }
+```
+
+Field names are matched loosely (`id|message_id|wamid`, `from|sender|wa_id`,
+`text|body|message` — `text` may also be `{ "body": … }` — and `timestamp` as
+ISO-8601, epoch seconds or milliseconds). Messages that **start with
+"Status"** (any case, `status?`, `/status` …) get a reply built from the local
+database:
+
+```
+YouTube: Uploading (42%) | Instagram: Pending
+"Launch teaser" — uploading, 42% overall.
+
+Other uploads:
+• Weekly vlog — YouTube: Pending | Instagram: Pending (scheduled, in 3h 10m)
+• Behind the scenes — YouTube: Completed | Instagram: Completed (completed)
+```
+
+`Status <part of a title>` narrows the reply to matching uploads. Messages from
+other numbers, messages older than the last poll and anything that is not a
+status request are ignored; every message id is remembered so a reply is sent
+once even though the UI isolate, the foreground service and the WorkManager
+watchdog all poll (they coordinate through `whatsapp_inbox.json` and an
+exclusive lock file in the app's support directory).
+
+**Reply latency:** every 30 s while the app is open or the scheduler service is
+armed/uploading; otherwise the 15-minute watchdog picks the message up. Use the
+**Check inbox now** button in Settings to force a poll.
+
+### A minimal agent
+
+Any bridge that implements the two routes above works. Sketch (Node +
+Express; the `sendWhatsApp` / `onWhatsAppMessage` hooks come from whichever
+WhatsApp library or provider you use):
+
+```js
+const app = require('express')().use(require('express').json());
+const inbox = [];                       // {id, from, text, timestamp}
+const KEY = process.env.AGENT_KEY;      // same value as "API Key" in Settings
+const auth = (req, res, next) =>
+  !KEY || req.get('x-api-key') === KEY ? next() : res.sendStatus(401);
+
+onWhatsAppMessage(m => inbox.push({ id: m.id, from: m.from, text: m.text,
+                                    timestamp: new Date().toISOString() }));
+
+app.post('/api/messages', auth, async (req, res) => {
+  await sendWhatsApp(req.body.to, req.body.text);
+  res.json({ ok: true });
+});
+app.get('/api/messages', auth, (req, res) => {
+  const since = req.query.since ? Date.parse(req.query.since) : 0;
+  res.json({ messages: inbox.filter(m => Date.parse(m.timestamp) >= since
+                                      && (!req.query.from || m.from.endsWith(req.query.from.slice(-10)))) });
+});
+app.listen(3000);
+```
+
+### Testing the agent on a phone
+
+1. Settings → WhatsApp Agent API: enter the endpoint (e.g.
+   `https://agent.example.com/api`), the API key if your bridge needs one and
+   your number in international format (`923001234567`). **Save**, then tap
+   **Send test message** — it should arrive on WhatsApp within seconds.
+2. Send **"Status"** to the agent's WhatsApp number. With the app open the
+   reply arrives within ~30 s (or immediately via **Check inbox now**); the
+   Settings section shows *Inbox last checked …* and *Last "Status" reply …*.
+3. Schedule an upload a few minutes ahead and lock the phone: you receive
+   *Time reached…* at the exact minute, and *Upload failed…* right after
+   (placeholders until Phases 4/5). "Status" answered while the service is
+   armed comes back within 30 s; later ones within 15 minutes.
+
 ## Project layout
 
 ```
@@ -103,7 +239,15 @@ lib/
 │   ├── scheduler_status.dart         # status snapshot shared between isolates (JSON file)
 │   └── background_runtime.dart       # per-isolate dependency wiring
 ├── integrations/
-│   ├── whatsapp/whatsapp_agent.dart  # outbound agent interface (HTTP client in Phase 3)
+│   ├── whatsapp/
+│   │   ├── whatsapp_agent.dart       # outbound interface + HttpWhatsAppAgent
+│   │   ├── whatsapp_client.dart      # HTTP client: send / fetch inbox (generic + Cloud API)
+│   │   ├── whatsapp_messages.dart    # exact texts + "Status" detection
+│   │   ├── inbound_message.dart      # tolerant JSON parsing of inbox messages
+│   │   ├── status_reply_builder.dart # DB → "YouTube: … | Instagram: …" reply
+│   │   ├── inbox_service.dart        # poll → de-duplicate → reply (shared lock + cursor)
+│   │   ├── inbox_cursor_store.dart   # whatsapp_inbox.json + cross-isolate lock file
+│   │   └── inbox_poller.dart         # 30 s foreground polling while the app is open
 │   └── uploaders/video_uploader.dart # uploader interface + placeholders (Phases 4/5)
 ├── core/
 │   ├── env.dart                  # YOUR_… placeholders (String.fromEnvironment)
@@ -119,7 +263,7 @@ lib/
 │   ├── settings_service.dart         # AppSettings load/save/seed-from-.env
 │   ├── video_file_service.dart       # pick video, keep private copy on device
 │   └── local_notifier.dart           # "Time reached" / completed / failed notifications
-├── state/                            # ChangeNotifier providers (schedule, settings, background)
+├── state/                            # ChangeNotifier providers (schedule, settings, background, whatsapp)
 └── ui/
     ├── home/                         # list + cards + empty state + scheduler status row
     ├── add_upload/                   # create / edit form
@@ -190,7 +334,8 @@ flutter build apk --release --dart-define-from-file=.env
 Any value still equal to its `YOUR_…` placeholder is ignored. Seeded values only
 fill fields that are still empty on the phone and can be changed in Settings.
 Full instructions for obtaining each key (Google Cloud Console, Meta Developer
-App, WhatsApp agent, ngrok) arrive with Phase 6.
+App, ngrok) arrive with Phase 6; the WhatsApp agent contract is documented
+above.
 
 ## Data model
 

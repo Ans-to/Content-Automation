@@ -47,6 +47,10 @@ abstract final class Env {
     'WHATSAPP_RECIPIENT_NUMBER',
     defaultValue: 'YOUR_WHATSAPP_RECIPIENT_NUMBER',
   );
+  static const String whatsappAgentInboxUrl = String.fromEnvironment(
+    'WHATSAPP_AGENT_INBOX_URL',
+    defaultValue: 'YOUR_WHATSAPP_AGENT_INBOX_URL',
+  );
 
   // --- Tunnel (Instagram device-first bridge, Phase 5) -----------------------
   static const String ngrokAuthToken = String.fromEnvironment(

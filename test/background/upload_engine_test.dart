@@ -164,7 +164,7 @@ void main() {
 
     test('an unconfigured agent is skipped with a warning in the log', () async {
       final h = EngineHarness(
-        agent: RecordingWhatsAppAgent(isConfigured: false),
+        agent: RecordingWhatsAppAgent(configured: false),
       );
       final id = (await h.addUpload()).id!;
 

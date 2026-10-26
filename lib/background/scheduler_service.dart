@@ -97,6 +97,9 @@ class SchedulerServiceSession {
         debugPrint('Scheduler: processing failed: $e\n$stack');
       }
 
+      // Answer "Status" messages while we are awake anyway.
+      await runtime.pollInbox();
+
       final SchedulerPlan plan;
       try {
         plan = await runtime.planner.replan();

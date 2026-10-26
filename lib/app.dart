@@ -11,6 +11,7 @@ import 'services/video_file_service.dart';
 import 'state/background_provider.dart';
 import 'state/schedule_provider.dart';
 import 'state/settings_provider.dart';
+import 'state/whatsapp_provider.dart';
 import 'ui/home/home_screen.dart';
 
 /// Root widget. Dependencies are injected so tests can swap in fakes.
@@ -22,6 +23,7 @@ class ContentAutomationApp extends StatelessWidget {
     required this.videoFileService,
     required this.platformBridge,
     required this.backgroundController,
+    required this.whatsapp,
   });
 
   final ScheduleRepository repository;
@@ -29,6 +31,9 @@ class ContentAutomationApp extends StatelessWidget {
   final VideoFileService videoFileService;
   final PlatformBridge platformBridge;
   final BackgroundController backgroundController;
+
+  /// WhatsApp agent tools for the Settings screen (test message, inbox).
+  final WhatsAppProvider whatsapp;
 
   @override
   Widget build(BuildContext context) {
@@ -53,6 +58,7 @@ class ContentAutomationApp extends StatelessWidget {
             controller: backgroundController,
           )..refresh(),
         ),
+        ChangeNotifierProvider<WhatsAppProvider>.value(value: whatsapp),
       ],
       child: MaterialApp(
         title: AppConstants.appName,

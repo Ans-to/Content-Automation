@@ -5,8 +5,10 @@ import '../../core/theme.dart';
 import '../../services/settings_service.dart';
 import '../../state/background_provider.dart';
 import '../../state/settings_provider.dart';
+import '../../state/whatsapp_provider.dart';
 import '../background/background_status_screen.dart';
 import 'widgets/secret_field.dart';
+import 'widgets/whatsapp_tools.dart';
 
 /// API credentials for YouTube, Instagram, the WhatsApp agent and the tunnel.
 /// Everything typed here is written to encrypted secure storage on the phone.
@@ -31,6 +33,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _whatsappEndpoint = TextEditingController();
   final _whatsappApiKey = TextEditingController();
   final _whatsappRecipient = TextEditingController();
+  final _whatsappInboxUrl = TextEditingController();
   // Tunnel
   final _ngrokAuthToken = TextEditingController();
 
@@ -43,6 +46,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _whatsappEndpoint,
     _whatsappApiKey,
     _whatsappRecipient,
+    _whatsappInboxUrl,
     _ngrokAuthToken,
   ];
 
@@ -102,6 +106,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _whatsappEndpoint.text = settings.whatsappEndpoint;
       _whatsappApiKey.text = settings.whatsappApiKey;
       _whatsappRecipient.text = settings.whatsappRecipient;
+      _whatsappInboxUrl.text = settings.whatsappInboxUrl;
       _ngrokAuthToken.text = settings.ngrokAuthToken;
     } finally {
       _populating = false;
@@ -119,6 +124,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     whatsappEndpoint: _whatsappEndpoint.text.trim(),
     whatsappApiKey: _whatsappApiKey.text.trim(),
     whatsappRecipient: _whatsappRecipient.text.trim(),
+    whatsappInboxUrl: _whatsappInboxUrl.text.trim(),
     ngrokAuthToken: _ngrokAuthToken.text.trim(),
   );
 
@@ -377,7 +383,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                         SecretField(
                           controller: _whatsappApiKey,
-                          label: 'API Key',
+                          label: 'API Key (optional)',
+                          helper:
+                              'Sent as "Authorization: Bearer …" and "X-API-Key".',
                           icon: Icons.key_outlined,
                         ),
                         SecretField(
@@ -386,11 +394,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           hint: '923001234567',
                           helper:
                               'International format, digits only. Receives the '
-                              'notifications.',
+                              'notifications and may ask for "Status".',
                           icon: Icons.phone_android_outlined,
                           secret: false,
                           keyboardType: TextInputType.phone,
                           validator: _validatePhone,
+                        ),
+                        SecretField(
+                          controller: _whatsappInboxUrl,
+                          label: 'Inbox URL (optional)',
+                          hint: 'https://your-agent.example.com/api/messages',
+                          helper:
+                              'Where incoming messages are fetched from. Leave '
+                              'empty to use <endpoint>/messages.',
+                          icon: Icons.inbox_outlined,
+                          secret: false,
+                          keyboardType: TextInputType.url,
+                          validator: _validateUrl,
+                        ),
+                        WhatsAppTools(
+                          provider: context.watch<WhatsAppProvider>(),
+                          configured: _loaded.isWhatsAppConfigured,
+                          unsavedChanges: _isDirty,
                         ),
                       ],
                     ),

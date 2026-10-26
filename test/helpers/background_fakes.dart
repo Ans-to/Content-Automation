@@ -8,6 +8,7 @@ import 'package:content_automation/background/workmanager_gateway.dart';
 import 'package:content_automation/data/models/enums.dart';
 import 'package:content_automation/data/models/scheduled_upload.dart';
 import 'package:content_automation/integrations/uploaders/video_uploader.dart';
+import 'package:content_automation/integrations/whatsapp/inbox_service.dart';
 import 'package:content_automation/integrations/whatsapp/whatsapp_agent.dart';
 import 'package:content_automation/services/local_notifier.dart';
 import 'package:content_automation/services/secure_key_value_store.dart';
@@ -68,10 +69,12 @@ class FakeUploader implements VideoUploader {
 
 /// Records the WhatsApp messages the engine would send.
 class RecordingWhatsAppAgent implements WhatsAppAgent {
-  RecordingWhatsAppAgent({this.isConfigured = true, this.failWith});
+  RecordingWhatsAppAgent({this.configured = true, this.failWith});
+
+  final bool configured;
 
   @override
-  final bool isConfigured;
+  Future<bool> isConfigured() async => configured;
 
   /// When set, every call throws this error.
   final Object? failWith;
@@ -109,6 +112,7 @@ class EngineHarness {
     RecordingWhatsAppAgent? agent,
     bool fileExistsInitially = true,
     Duration staleTimeout = const Duration(minutes: 20),
+    WhatsAppInboxService? inbox,
   }) : clock = FakeClock(now ?? DateTime(2026, 10, 26, 18, 0)),
        agent = agent ?? RecordingWhatsAppAgent(),
        fileExists = fileExistsInitially {
@@ -144,6 +148,7 @@ class EngineHarness {
       engine: engine,
       planner: planner,
       statusStore: statusStore,
+      inbox: inbox,
     );
   }
 

@@ -24,6 +24,7 @@ abstract final class UploadColumns {
   static const String instagramStatus = 'instagram_status';
   static const String youtubeVideoId = 'youtube_video_id';
   static const String instagramMediaId = 'instagram_media_id';
+  static const String youtubeUploadUri = 'youtube_upload_uri';
   static const String uploadProgress = 'upload_progress';
   static const String errorMessage = 'error_message';
   static const String retryCount = 'retry_count';
@@ -49,6 +50,7 @@ class ScheduledUpload {
     this.instagramStatus = PlatformUploadStatus.pending,
     this.youtubeVideoId,
     this.instagramMediaId,
+    this.youtubeUploadUri,
     this.uploadProgress = 0,
     this.errorMessage,
     this.retryCount = 0,
@@ -121,6 +123,10 @@ class ScheduledUpload {
   final String? youtubeVideoId;
   final String? instagramMediaId;
 
+  /// Resumable-upload session URI of an unfinished YouTube upload, so an
+  /// interrupted transfer can continue where it stopped.
+  final String? youtubeUploadUri;
+
   /// Overall progress 0..1 (updated by the uploaders).
   final double uploadProgress;
 
@@ -166,6 +172,7 @@ class ScheduledUpload {
     UploadColumns.instagramStatus: instagramStatus.dbValue,
     UploadColumns.youtubeVideoId: youtubeVideoId,
     UploadColumns.instagramMediaId: instagramMediaId,
+    UploadColumns.youtubeUploadUri: youtubeUploadUri,
     UploadColumns.uploadProgress: uploadProgress,
     UploadColumns.errorMessage: errorMessage,
     UploadColumns.retryCount: retryCount,
@@ -195,6 +202,7 @@ class ScheduledUpload {
       ),
       youtubeVideoId: map[UploadColumns.youtubeVideoId] as String?,
       instagramMediaId: map[UploadColumns.instagramMediaId] as String?,
+      youtubeUploadUri: map[UploadColumns.youtubeUploadUri] as String?,
       uploadProgress:
           (map[UploadColumns.uploadProgress] as num?)?.toDouble() ?? 0,
       errorMessage: map[UploadColumns.errorMessage] as String?,
@@ -223,6 +231,7 @@ class ScheduledUpload {
     PlatformUploadStatus? instagramStatus,
     Object? youtubeVideoId = _unset,
     Object? instagramMediaId = _unset,
+    Object? youtubeUploadUri = _unset,
     double? uploadProgress,
     Object? errorMessage = _unset,
     int? retryCount,
@@ -248,6 +257,9 @@ class ScheduledUpload {
       instagramMediaId: identical(instagramMediaId, _unset)
           ? this.instagramMediaId
           : instagramMediaId as String?,
+      youtubeUploadUri: identical(youtubeUploadUri, _unset)
+          ? this.youtubeUploadUri
+          : youtubeUploadUri as String?,
       uploadProgress: uploadProgress ?? this.uploadProgress,
       errorMessage: identical(errorMessage, _unset)
           ? this.errorMessage
@@ -297,6 +309,7 @@ class ScheduledUpload {
         other.instagramStatus == instagramStatus &&
         other.youtubeVideoId == youtubeVideoId &&
         other.instagramMediaId == instagramMediaId &&
+        other.youtubeUploadUri == youtubeUploadUri &&
         other.uploadProgress == uploadProgress &&
         other.errorMessage == errorMessage &&
         other.retryCount == retryCount;
@@ -318,6 +331,7 @@ class ScheduledUpload {
     instagramStatus,
     youtubeVideoId,
     instagramMediaId,
+    youtubeUploadUri,
     uploadProgress,
     errorMessage,
     retryCount,

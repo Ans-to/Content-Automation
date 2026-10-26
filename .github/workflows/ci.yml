@@ -107,8 +107,32 @@ jobs:
       - name: Resolve dependencies
         run: flutter pub get
 
-      # Release mode = the same bits you will sideload. Until Phase 6 wires a
-      # real keystore it is signed with the debug key (installable on a phone).
+      # Google Sign-In (YouTube) needs every APK to be signed with the SAME key
+      # whose SHA-1 is registered in Google Cloud. When the ANDROID_KEYSTORE_*
+      # secrets exist the build uses that keystore; otherwise it falls back to
+      # a throw-away debug key (installable, but sign-in will not work).
+      - name: Configure release signing (from secrets, optional)
+        id: signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/app/upload-keystore.jks
+            {
+              echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
+              echo "keyPassword=${ANDROID_KEY_PASSWORD:-$ANDROID_KEYSTORE_PASSWORD}"
+              echo "keyAlias=${ANDROID_KEY_ALIAS:-upload}"
+              echo "storeFile=upload-keystore.jks"
+            } > android/key.properties
+            echo "mode=release keystore (repository secrets)" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=debug key generated on this runner" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Release mode = the same bits you will sideload.
       - name: Build release APK
         id: build
         run: flutter build apk --release 2>&1 | tee build.log
@@ -120,6 +144,31 @@ jobs:
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
           retention-days: 14
+
+      # The SHA-1 shown here is what goes into the Android OAuth client.
+      - name: Report signing certificate (job summary)
+        run: |
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          APKSIGNER=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n 1)
+          CERTS=$("$APKSIGNER" verify --print-certs "$APK")
+          fmt() { echo "$1" | tr 'a-f' 'A-F' | sed 's/../&:/g; s/:$//'; }
+          SHA1=$(fmt "$(echo "$CERTS" | sed -n 's/.*SHA-1 digest: *//p' | head -n 1)")
+          SHA256=$(fmt "$(echo "$CERTS" | sed -n 's/.*SHA-256 digest: *//p' | head -n 1)")
+          {
+            echo "### APK signing certificate"
+            echo
+            echo "Signed with: **${{ steps.signing.outputs.mode }}**"
+            echo
+            echo '```'
+            echo "SHA-1:   $SHA1"
+            echo "SHA-256: $SHA256"
+            echo '```'
+            if [[ "${{ steps.signing.outputs.mode }}" == debug* ]]; then
+              echo
+              echo "> ⚠️ This key is regenerated on every run, so **Google Sign-In for YouTube will not work with this APK**."
+              echo "> Add the \`ANDROID_KEYSTORE_BASE64\` / \`ANDROID_KEYSTORE_PASSWORD\` / \`ANDROID_KEY_ALIAS\` / \`ANDROID_KEY_PASSWORD\` secrets (README → Phase 4) so every build is signed with the same key, then register that key's SHA-1 in Google Cloud."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Report (commit comment with build log tail)
         if: ${{ failure() && github.event_name == 'push' }}

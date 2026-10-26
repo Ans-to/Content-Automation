@@ -10,6 +10,9 @@ class InMemoryScheduleRepository implements ScheduleRepository {
   int _nextUploadId = 1;
   int _nextEventId = 1;
 
+  /// Number of [updateStatus] calls (lets tests check progress throttling).
+  int statusWrites = 0;
+
   @override
   Future<ScheduledUpload> create(ScheduledUpload upload) async {
     final created = upload.copyWith(id: _nextUploadId++);
@@ -84,12 +87,15 @@ class InMemoryScheduleRepository implements ScheduleRepository {
     double? uploadProgress,
     String? youtubeVideoId,
     String? instagramMediaId,
+    String? youtubeUploadUri,
+    bool clearYoutubeUploadUri = false,
     String? errorMessage,
     bool clearErrorMessage = false,
     bool incrementRetryCount = false,
   }) async {
     final current = _uploads[id];
     if (current == null) return;
+    statusWrites++;
     _uploads[id] = current.copyWith(
       status: status,
       youtubeStatus: youtubeStatus,
@@ -97,6 +103,9 @@ class InMemoryScheduleRepository implements ScheduleRepository {
       uploadProgress: uploadProgress,
       youtubeVideoId: youtubeVideoId ?? current.youtubeVideoId,
       instagramMediaId: instagramMediaId ?? current.instagramMediaId,
+      youtubeUploadUri: clearYoutubeUploadUri
+          ? null
+          : (youtubeUploadUri ?? current.youtubeUploadUri),
       errorMessage: clearErrorMessage
           ? null
           : (errorMessage ?? current.errorMessage),

@@ -12,6 +12,8 @@ import 'integrations/whatsapp/inbox_poller.dart';
 import 'integrations/whatsapp/inbox_service.dart';
 import 'integrations/whatsapp/whatsapp_agent.dart';
 import 'integrations/whatsapp/whatsapp_client.dart';
+import 'integrations/youtube/google_auth_gateway.dart';
+import 'integrations/youtube/youtube_account_service.dart';
 import 'services/settings_service.dart';
 import 'services/video_file_service.dart';
 import 'state/whatsapp_provider.dart';
@@ -52,6 +54,13 @@ Future<void> main() async {
     poller: inboxPoller,
   );
 
+  // YouTube: interactive Google sign-in lives in the UI isolate; the
+  // background isolates refresh tokens for the stored account on their own.
+  final youtubeAccount = YouTubeAccountService(
+    auth: GoogleSignInGateway(),
+    settingsService: settingsService,
+  );
+
   // Configure the foreground service / WorkManager once the first frame is
   // on screen so start-up stays snappy.
   binding.addPostFrameCallback((_) {
@@ -68,6 +77,7 @@ Future<void> main() async {
       platformBridge: platformBridge,
       backgroundController: backgroundController,
       whatsapp: whatsapp,
+      youtubeAccount: youtubeAccount,
     ),
   );
 }

@@ -1,8 +1,12 @@
+import 'dart:io';
+
+import 'package:content_automation/core/constants.dart';
 import 'package:content_automation/data/database/app_database.dart';
 import 'package:content_automation/data/models/enums.dart';
 import 'package:content_automation/data/models/scheduled_upload.dart';
 import 'package:content_automation/data/repositories/schedule_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 /// Runs the SQLite repository against a real (in-memory) SQLite engine.
@@ -162,6 +166,98 @@ void main() {
     expect(fetched.errorMessage, isNull);
     expect(fetched.youtubeVideoId, 'yt42');
     expect(fetched.uploadProgress, 1);
+  });
+
+  test('YouTube upload session round-trips and can be cleared', () async {
+    final id = (await repository.create(sample())).id!;
+
+    await repository.updateStatus(
+      id,
+      youtubeUploadUri: 'https://www.googleapis.com/upload/youtube/v3/videos?upload_id=abc',
+    );
+    var fetched = (await repository.getById(id))!;
+    expect(fetched.youtubeUploadUri, contains('upload_id=abc'));
+
+    // Unrelated updates keep it.
+    await repository.updateStatus(id, uploadProgress: 0.4);
+    fetched = (await repository.getById(id))!;
+    expect(fetched.youtubeUploadUri, contains('upload_id=abc'));
+
+    await repository.updateStatus(id, clearYoutubeUploadUri: true);
+    fetched = (await repository.getById(id))!;
+    expect(fetched.youtubeUploadUri, isNull);
+  });
+
+  test('a version 1 database is migrated in place', () async {
+    final dir = await Directory.systemTemp.createTemp('ca_migration_');
+    final path = p.join(dir.path, 'v1.db');
+    addTearDown(() => dir.delete(recursive: true));
+
+    // Phase 1–3 schema (no youtube_upload_uri column).
+    final v1 = await databaseFactoryFfi.openDatabase(
+      path,
+      options: OpenDatabaseOptions(
+        version: 1,
+        onCreate: (db, _) async {
+          await db.execute('''
+CREATE TABLE scheduled_uploads (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  video_path TEXT NOT NULL,
+  video_name TEXT NOT NULL,
+  video_size_bytes INTEGER NOT NULL DEFAULT 0,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  tags TEXT NOT NULL DEFAULT '',
+  scheduled_time INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'scheduled',
+  platform TEXT NOT NULL DEFAULT 'both',
+  youtube_status TEXT NOT NULL DEFAULT 'pending',
+  instagram_status TEXT NOT NULL DEFAULT 'pending',
+  youtube_video_id TEXT,
+  instagram_media_id TEXT,
+  upload_progress REAL NOT NULL DEFAULT 0,
+  error_message TEXT,
+  retry_count INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+)''');
+          await db.execute('''
+CREATE TABLE upload_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  upload_id INTEGER NOT NULL REFERENCES scheduled_uploads(id) ON DELETE CASCADE,
+  timestamp INTEGER NOT NULL,
+  level TEXT NOT NULL DEFAULT 'info',
+  message TEXT NOT NULL
+)''');
+        },
+      ),
+    );
+    await v1.insert('scheduled_uploads', {
+      'video_path': '/videos/old.mp4',
+      'video_name': 'old.mp4',
+      'title': 'Old row',
+      'scheduled_time': DateTime(2030).millisecondsSinceEpoch,
+      'created_at': 1,
+      'updated_at': 1,
+    });
+    await v1.close();
+
+    final upgraded = AppDatabase(path: path, factory: databaseFactoryFfi);
+    addTearDown(upgraded.close);
+    final db = await upgraded.database;
+    expect(await db.getVersion(), AppConstants.databaseVersion);
+
+    final columns = (await db.rawQuery('PRAGMA table_info(scheduled_uploads)'))
+        .map((row) => row['name'])
+        .toList();
+    expect(columns, contains(UploadColumns.youtubeUploadUri));
+
+    final repo = SqliteScheduleRepository(upgraded);
+    final old = (await repo.getAll()).single;
+    expect(old.title, 'Old row');
+    expect(old.youtubeUploadUri, isNull);
+    await repo.updateStatus(old.id!, youtubeUploadUri: 'https://x');
+    expect((await repo.getById(old.id!))!.youtubeUploadUri, 'https://x');
   });
 
   test('events are logged newest-first and cascade on delete', () async {

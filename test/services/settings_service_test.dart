@@ -32,8 +32,15 @@ void main() {
       expect(empty.isWhatsAppConfigured, isFalse);
       expect(empty.isEmpty, isTrue);
 
+      // A client ID alone is not enough for YouTube: an account must be
+      // signed in as well (Phase 4).
+      const clientOnly = AppSettings(youtubeClientId: 'cid');
+      expect(clientOnly.isYouTubeConfigured, isFalse);
+      expect(clientOnly.isYouTubeSignedIn, isFalse);
+
       const full = AppSettings(
         youtubeClientId: 'cid',
+        youtubeAccountEmail: 'me@example.com',
         instagramAccessToken: 'tok',
         instagramBusinessAccountId: '178',
         whatsappEndpoint: 'https://a.example',
@@ -41,6 +48,7 @@ void main() {
         whatsappRecipient: '923001234567',
       );
       expect(full.isYouTubeConfigured, isTrue);
+      expect(full.isYouTubeSignedIn, isTrue);
       expect(full.isInstagramConfigured, isTrue);
       expect(full.isWhatsAppConfigured, isTrue);
       expect(full.isTunnelConfigured, isFalse);
@@ -94,6 +102,29 @@ void main() {
       expect(loaded.youtubeClientId, 'cid');
       expect(loaded.whatsappEndpoint, 'https://agent.example.com');
       expect(loaded.isWhatsAppConfigured, isTrue);
+    });
+
+    test('YouTube account fields round-trip', () async {
+      await service.save(
+        const AppSettings(
+          youtubeClientId: 'cid',
+          youtubeAccountEmail: 'me@example.com',
+          youtubeChannelTitle: 'My Channel',
+        ),
+      );
+      expect(await store.read(SettingsKeys.youtubeAccountEmail), 'me@example.com');
+      final loaded = await service.load();
+      expect(loaded.youtubeChannelTitle, 'My Channel');
+      expect(loaded.isYouTubeConfigured, isTrue);
+
+      // Signing out clears only the account fields.
+      await service.save(
+        loaded.copyWith(youtubeAccountEmail: '', youtubeChannelTitle: ''),
+      );
+      final signedOut = await service.load();
+      expect(signedOut.youtubeClientId, 'cid');
+      expect(signedOut.isYouTubeSignedIn, isFalse);
+      expect(await store.read(SettingsKeys.youtubeAccountEmail), isNull);
     });
 
     test('emptying a field removes it from storage', () async {

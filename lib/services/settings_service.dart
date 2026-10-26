@@ -8,6 +8,11 @@ abstract final class SettingsKeys {
   static const String youtubeClientId = 'youtube_client_id';
   static const String youtubeApiKey = 'youtube_api_key';
 
+  /// Google account chosen in Settings → YouTube → Sign in (Phase 4). Stored
+  /// so background isolates can refresh tokens for that account silently.
+  static const String youtubeAccountEmail = 'youtube_account_email';
+  static const String youtubeChannelTitle = 'youtube_channel_title';
+
   static const String instagramAppId = 'instagram_app_id';
   static const String instagramAccessToken = 'instagram_access_token';
   static const String instagramBusinessAccountId =
@@ -23,6 +28,8 @@ abstract final class SettingsKeys {
   static const List<String> all = [
     youtubeClientId,
     youtubeApiKey,
+    youtubeAccountEmail,
+    youtubeChannelTitle,
     instagramAppId,
     instagramAccessToken,
     instagramBusinessAccountId,
@@ -40,6 +47,8 @@ class AppSettings {
   const AppSettings({
     this.youtubeClientId = '',
     this.youtubeApiKey = '',
+    this.youtubeAccountEmail = '',
+    this.youtubeChannelTitle = '',
     this.instagramAppId = '',
     this.instagramAccessToken = '',
     this.instagramBusinessAccountId = '',
@@ -55,6 +64,7 @@ class AppSettings {
   factory AppSettings.fromEnv() => AppSettings(
     youtubeClientId: Env.valueOrNull(Env.youtubeClientId) ?? '',
     youtubeApiKey: Env.valueOrNull(Env.youtubeApiKey) ?? '',
+    // The signed-in account can only come from the device.
     instagramAppId: Env.valueOrNull(Env.instagramAppId) ?? '',
     instagramAccessToken: Env.valueOrNull(Env.instagramAccessToken) ?? '',
     instagramBusinessAccountId:
@@ -69,6 +79,8 @@ class AppSettings {
   factory AppSettings.fromMap(Map<String, String> map) => AppSettings(
     youtubeClientId: map[SettingsKeys.youtubeClientId] ?? '',
     youtubeApiKey: map[SettingsKeys.youtubeApiKey] ?? '',
+    youtubeAccountEmail: map[SettingsKeys.youtubeAccountEmail] ?? '',
+    youtubeChannelTitle: map[SettingsKeys.youtubeChannelTitle] ?? '',
     instagramAppId: map[SettingsKeys.instagramAppId] ?? '',
     instagramAccessToken: map[SettingsKeys.instagramAccessToken] ?? '',
     instagramBusinessAccountId:
@@ -81,8 +93,16 @@ class AppSettings {
   );
 
   // YouTube Data API v3
+  /// OAuth client ID of type **Web application** (used as `serverClientId`
+  /// by Google Sign-In on Android).
   final String youtubeClientId;
   final String youtubeApiKey;
+
+  /// Google account signed in on this device ('' = not signed in).
+  final String youtubeAccountEmail;
+
+  /// Channel name shown in Settings (informational).
+  final String youtubeChannelTitle;
 
   // Instagram Graph API
   final String instagramAppId;
@@ -101,9 +121,12 @@ class AppSettings {
   // Tunnel (Phase 5)
   final String ngrokAuthToken;
 
-  /// The OAuth client ID is what the YouTube uploader needs; the API key is
-  /// optional (only used for unauthenticated reads).
-  bool get isYouTubeConfigured => youtubeClientId.isNotEmpty;
+  /// Uploading needs the Web OAuth client ID *and* a signed-in Google
+  /// account; the API key is optional.
+  bool get isYouTubeConfigured =>
+      youtubeClientId.isNotEmpty && isYouTubeSignedIn;
+
+  bool get isYouTubeSignedIn => youtubeAccountEmail.isNotEmpty;
 
   bool get isInstagramConfigured =>
       instagramAccessToken.isNotEmpty && instagramBusinessAccountId.isNotEmpty;
@@ -120,6 +143,8 @@ class AppSettings {
   Map<String, String> toMap() => {
     SettingsKeys.youtubeClientId: youtubeClientId,
     SettingsKeys.youtubeApiKey: youtubeApiKey,
+    SettingsKeys.youtubeAccountEmail: youtubeAccountEmail,
+    SettingsKeys.youtubeChannelTitle: youtubeChannelTitle,
     SettingsKeys.instagramAppId: instagramAppId,
     SettingsKeys.instagramAccessToken: instagramAccessToken,
     SettingsKeys.instagramBusinessAccountId: instagramBusinessAccountId,
@@ -147,6 +172,8 @@ class AppSettings {
   AppSettings copyWith({
     String? youtubeClientId,
     String? youtubeApiKey,
+    String? youtubeAccountEmail,
+    String? youtubeChannelTitle,
     String? instagramAppId,
     String? instagramAccessToken,
     String? instagramBusinessAccountId,
@@ -158,6 +185,8 @@ class AppSettings {
   }) => AppSettings(
     youtubeClientId: youtubeClientId ?? this.youtubeClientId,
     youtubeApiKey: youtubeApiKey ?? this.youtubeApiKey,
+    youtubeAccountEmail: youtubeAccountEmail ?? this.youtubeAccountEmail,
+    youtubeChannelTitle: youtubeChannelTitle ?? this.youtubeChannelTitle,
     instagramAppId: instagramAppId ?? this.instagramAppId,
     instagramAccessToken: instagramAccessToken ?? this.instagramAccessToken,
     instagramBusinessAccountId:

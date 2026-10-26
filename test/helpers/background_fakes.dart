@@ -36,6 +36,8 @@ class FakeUploader implements VideoUploader {
     this.error,
     this.progressSteps = const [0.5, 1.0],
     this.throwError,
+    this.sessionToSave,
+    this.afterSessionSaved,
   });
 
   @override
@@ -45,7 +47,15 @@ class FakeUploader implements VideoUploader {
   final Object? throwError;
   final List<double> progressSteps;
 
+  /// When set, saved through `saveSession` before progress is reported.
+  final String? sessionToSave;
+
+  /// Hook run right after [sessionToSave] was handed to `saveSession`
+  /// (lets a test inspect the persisted row mid-upload).
+  final Future<void> Function(ScheduledUpload upload)? afterSessionSaved;
+
   final List<ScheduledUpload> calls = [];
+  final List<String?> savedSessions = [];
   AppSettings? lastSettings;
 
   @override
@@ -54,15 +64,23 @@ class FakeUploader implements VideoUploader {
     required AppSettings settings,
     required UploadProgressCallback onProgress,
     required UploadLogger log,
+    required UploadSessionSaver saveSession,
   }) async {
     calls.add(upload);
     lastSettings = settings;
     await log('${platform.label}: fake upload started');
+    if (sessionToSave != null) {
+      savedSessions.add(sessionToSave);
+      await saveSession(sessionToSave);
+      await afterSessionSaved?.call(upload);
+    }
     for (final step in progressSteps) {
       onProgress(step);
     }
     if (throwError != null) throw throwError!;
     if (error != null) return UploadOutcome.failure(error!);
+    savedSessions.add(null);
+    await saveSession(null);
     return UploadOutcome.success(remoteId: remoteId);
   }
 }
@@ -112,6 +130,8 @@ class EngineHarness {
     RecordingWhatsAppAgent? agent,
     bool fileExistsInitially = true,
     Duration staleTimeout = const Duration(minutes: 20),
+    Duration progressWriteInterval = Duration.zero,
+    int maxResumeAttempts = 3,
     WhatsAppInboxService? inbox,
   }) : clock = FakeClock(now ?? DateTime(2026, 10, 26, 18, 0)),
        agent = agent ?? RecordingWhatsAppAgent(),
@@ -134,6 +154,8 @@ class EngineHarness {
       },
       clock: clock.call,
       staleTimeout: staleTimeout,
+      progressWriteInterval: progressWriteInterval,
+      maxResumeAttempts: maxResumeAttempts,
       fileExists: (_) => fileExists,
     );
     planner = WakeupPlanner(

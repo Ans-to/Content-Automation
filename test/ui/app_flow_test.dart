@@ -6,6 +6,8 @@ import 'package:content_automation/data/models/scheduled_upload.dart';
 import 'package:content_automation/integrations/whatsapp/inbox_cursor_store.dart';
 import 'package:content_automation/integrations/whatsapp/whatsapp_agent.dart';
 import 'package:content_automation/integrations/whatsapp/whatsapp_client.dart';
+import 'package:content_automation/integrations/youtube/google_auth_gateway.dart';
+import 'package:content_automation/integrations/youtube/youtube_account_service.dart';
 import 'package:content_automation/services/secure_key_value_store.dart';
 import 'package:content_automation/services/settings_service.dart';
 import 'package:content_automation/services/video_file_service.dart';
@@ -24,6 +26,7 @@ void main() {
   late InMemoryPlatformBridge bridge;
   late NoopBackgroundController background;
   late List<http.Request> agentRequests;
+  late InMemoryGoogleAuthGateway googleAuth;
 
   Widget buildApp() {
     final settingsService = SettingsService(
@@ -48,6 +51,11 @@ void main() {
         ),
         cursorStore: InMemoryInboxCursorStore(),
       ),
+      youtubeAccount: YouTubeAccountService(
+        auth: googleAuth,
+        settingsService: settingsService,
+        client: MockClient((request) async => http.Response('{}', 200)),
+      ),
     );
   }
 
@@ -60,6 +68,7 @@ void main() {
       ..exactAlarmsAllowed = true;
     background = NoopBackgroundController();
     agentRequests = [];
+    googleAuth = InMemoryGoogleAuthGateway();
   });
 
   Future<void> useTallScreen(WidgetTester tester) async {
@@ -252,7 +261,7 @@ void main() {
     expect(find.text('WhatsApp Agent API'), findsOneWidget);
 
     await tester.enterText(
-      find.widgetWithText(TextFormField, 'OAuth Client ID'),
+      find.widgetWithText(TextFormField, 'Web OAuth client ID'),
       '1234-abc.apps.googleusercontent.com',
     );
     await tester.pumpAndSettle();
@@ -265,6 +274,86 @@ void main() {
       await store.read(SettingsKeys.youtubeClientId),
       '1234-abc.apps.googleusercontent.com',
     );
+  });
+
+  testWidgets('YouTube: sign in with Google after saving the client ID', (
+    tester,
+  ) async {
+    await useTallScreen(tester);
+    await tester.pumpWidget(buildApp());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+
+    // Disabled until a client ID is stored.
+    final signInButton = find.byKey(const Key('youtube-sign-in'));
+    expect(signInButton, findsOneWidget);
+    expect(tester.widget<FilledButton>(signInButton).enabled, isFalse);
+    expect(find.textContaining('Paste the Web application client ID'), findsOneWidget);
+
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Web OAuth client ID'),
+      'web-id.apps.googleusercontent.com',
+    );
+    await tester.pumpAndSettle();
+    // Typed but unsaved → still disabled, with a hint.
+    expect(tester.widget<FilledButton>(signInButton).enabled, isFalse);
+    expect(find.textContaining('Save the client ID first'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Save'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<FilledButton>(signInButton).enabled, isTrue);
+
+    await tester.tap(signInButton);
+    await tester.pumpAndSettle();
+
+    // Account picked through the (fake) Google flow and persisted.
+    expect(googleAuth.initializedWith, 'web-id.apps.googleusercontent.com');
+    expect(googleAuth.scopeRequests.single, contains(YouTubeScopes.upload));
+    expect(find.text('creator@example.com'), findsOneWidget);
+    expect(find.byKey(const Key('youtube-sign-out')), findsOneWidget);
+    expect(await store.read(SettingsKeys.youtubeAccountEmail), 'creator@example.com');
+
+    // Saving the form again must not wipe the account.
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'API Key'),
+      'AIza-test',
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Save'));
+    await tester.pumpAndSettle();
+    expect(await store.read(SettingsKeys.youtubeAccountEmail), 'creator@example.com');
+    expect(await store.read(SettingsKeys.youtubeApiKey), 'AIza-test');
+
+    // Sign out clears the account but keeps the client ID.
+    await tester.tap(find.byKey(const Key('youtube-sign-out')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('youtube-sign-in')), findsOneWidget);
+    expect(await store.read(SettingsKeys.youtubeAccountEmail), isNull);
+    expect(
+      await store.read(SettingsKeys.youtubeClientId),
+      'web-id.apps.googleusercontent.com',
+    );
+  });
+
+  testWidgets('YouTube: a failed sign-in shows the reason', (tester) async {
+    await useTallScreen(tester);
+    await store.write(SettingsKeys.youtubeClientId, 'web-id');
+    googleAuth.signInError = const GoogleAuthException(
+      'Google rejected the OAuth client ID. Paste the client ID of type '
+      '"Web application".',
+    );
+    await tester.pumpWidget(buildApp());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('youtube-sign-in')));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Google rejected the OAuth client ID'), findsOneWidget);
+    expect(await store.read(SettingsKeys.youtubeAccountEmail), isNull);
   });
 
   testWidgets('settings screen rejects an invalid endpoint URL', (tester) async {

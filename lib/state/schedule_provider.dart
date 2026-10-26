@@ -180,32 +180,53 @@ class ScheduleProvider extends ChangeNotifier {
   }
 
   /// Re-arms a failed (or completed) upload for a new time.
+  ///
+  /// Retrying a *failed* upload only redoes the platforms that did not finish
+  /// (e.g. YouTube succeeded, Instagram failed → Instagram only); uploading
+  /// a completed schedule again repeats both.
   Future<void> reschedule(ScheduledUpload upload, DateTime newTime) async {
     final id = upload.id;
     if (id == null) return;
+    final retry = upload.status == UploadStatus.failed;
+    PlatformUploadStatus reset(bool included, PlatformUploadStatus current) {
+      if (!included) return PlatformUploadStatus.notApplicable;
+      if (retry && current == PlatformUploadStatus.completed) return current;
+      return PlatformUploadStatus.pending;
+    }
+
     await _repository.updateStatus(
       id,
       status: UploadStatus.scheduled,
-      youtubeStatus: upload.platform.includesYouTube
-          ? PlatformUploadStatus.pending
-          : PlatformUploadStatus.notApplicable,
-      instagramStatus: upload.platform.includesInstagram
-          ? PlatformUploadStatus.pending
-          : PlatformUploadStatus.notApplicable,
+      youtubeStatus: reset(
+        upload.platform.includesYouTube,
+        upload.youtubeStatus,
+      ),
+      instagramStatus: reset(
+        upload.platform.includesInstagram,
+        upload.instagramStatus,
+      ),
       uploadProgress: 0,
       clearErrorMessage: true,
-      incrementRetryCount: upload.status == UploadStatus.failed,
+      clearYoutubeUploadUri: true,
+      incrementRetryCount: retry,
     );
     await _repository.update(
       (await _repository.getById(id) ?? upload).copyWith(scheduledTime: newTime),
     );
     await _repository.logEvent(
       id,
-      'Rescheduled for ${Formatters.dateTime(newTime)}.',
+      retry
+          ? 'Retry scheduled for ${Formatters.dateTime(newTime)}.'
+          : 'Rescheduled for ${Formatters.dateTime(newTime)}.',
     );
     await load();
     await _syncBackground();
   }
+
+  /// Retries a failed upload immediately (it becomes due right away and the
+  /// background service picks it up).
+  Future<void> retryNow(ScheduledUpload upload) =>
+      reschedule(upload, DateTime.now());
 
   /// Removes the schedule and its private video copy.
   Future<void> delete(ScheduledUpload upload) async {

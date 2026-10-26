@@ -41,6 +41,8 @@ class UploadEngine {
     required Map<UploadPlatform, VideoUploader> uploaders,
     DateTime Function()? clock,
     this.staleTimeout = AppConstants.staleUploadTimeout,
+    this.progressWriteInterval = const Duration(milliseconds: 1500),
+    this.maxResumeAttempts = AppConstants.maxUploadResumeAttempts,
     bool Function(String path)? fileExists,
   }) : _repository = repository,
        _settingsService = settingsService,
@@ -62,6 +64,13 @@ class UploadEngine {
   /// considered interrupted.
   final Duration staleTimeout;
 
+  /// Progress rows are written at most this often (uploaders report every
+  /// 64 KiB); the row's `updated_at` doubles as the liveness heartbeat.
+  final Duration progressWriteInterval;
+
+  /// How many times an interrupted upload is resumed before giving up.
+  final int maxResumeAttempts;
+
   /// Called whenever the engine starts/advances work (service notification).
   void Function(EngineActivity activity)? onActivity;
 
@@ -78,38 +87,92 @@ class UploadEngine {
     return processed;
   }
 
-  /// Marks uploads that were left "triggered"/"uploading" by a killed process
-  /// as failed so they do not hang forever. Returns how many were recovered.
-  Future<int> recoverInterrupted() async {
+  /// Picks up uploads that were left "triggered"/"uploading" by a killed
+  /// process. If the video is still on the device and the attempt budget is
+  /// not spent, the upload is resumed right here (YouTube continues from the
+  /// last confirmed byte via the stored session URI; platforms that already
+  /// finished are not repeated). Otherwise it is marked as failed.
+  ///
+  /// [staleAfter] overrides [staleTimeout]; the service uses a short window at
+  /// start-up because nothing can be in flight in a freshly started process.
+  /// Returns how many uploads were resumed or failed.
+  Future<int> recoverInterrupted({Duration? staleAfter}) async {
+    final threshold = staleAfter ?? staleTimeout;
     final now = _clock();
     var recovered = 0;
-    for (final upload in await _repository.getActive()) {
-      final id = upload.id;
+    for (final stale in await _repository.getActive()) {
+      final id = stale.id;
       if (id == null) continue;
-      if (now.difference(upload.updatedAt) < staleTimeout) continue;
+      if (now.difference(stale.updatedAt) < threshold) continue;
 
-      const error =
-          'Interrupted: the app or its background service was stopped during '
-          'the upload. Reschedule to try again.';
-      await _repository.updateStatus(
+      // Take ownership so a concurrently starting isolate does not resume
+      // the same upload twice.
+      final claimed = await _repository.claim(
         id,
-        status: UploadStatus.failed,
-        youtubeStatus: upload.youtubeStatus == PlatformUploadStatus.uploading
-            ? PlatformUploadStatus.failed
-            : null,
-        instagramStatus:
-            upload.instagramStatus == PlatformUploadStatus.uploading
-            ? PlatformUploadStatus.failed
-            : null,
-        errorMessage: error,
+        from: stale.status,
+        to: UploadStatus.triggered,
       );
-      await _repository.logEvent(id, error, level: EventLevel.error);
-      final refreshed = await _repository.getById(id) ?? upload;
-      await _notifier.uploadFailed(refreshed, error);
-      await _notifyAgentFailure(refreshed, error);
+      if (!claimed) continue;
+      final upload = await _repository.getById(id) ?? stale;
+
+      if (!_fileExists(upload.videoPath)) {
+        await _failInterrupted(
+          upload,
+          'Interrupted: the app or its background service was stopped during '
+          'the upload and the video file is no longer on this device.',
+        );
+        recovered++;
+        continue;
+      }
+      if (upload.retryCount >= maxResumeAttempts) {
+        await _failInterrupted(
+          upload,
+          'Interrupted: the app or its background service was stopped during '
+          'the upload $maxResumeAttempts times. Reschedule to try again.',
+        );
+        recovered++;
+        continue;
+      }
+
+      await _repository.updateStatus(id, incrementRetryCount: true);
+      final attempt = upload.retryCount + 1;
+      await _repository.logEvent(
+        id,
+        'Upload was interrupted (no progress since '
+        '${Formatters.time(upload.updatedAt)}). Resuming — attempt $attempt '
+        'of $maxResumeAttempts.',
+        level: EventLevel.warning,
+      );
+      _emit(id, upload.title, 'Resuming interrupted upload…');
+      await _runUploads(
+        (await _repository.getById(id) ?? upload).copyWith(
+          retryCount: attempt,
+        ),
+      );
       recovered++;
     }
     return recovered;
+  }
+
+  Future<void> _failInterrupted(ScheduledUpload upload, String error) async {
+    final id = upload.id!;
+    await _repository.updateStatus(
+      id,
+      status: UploadStatus.failed,
+      youtubeStatus: upload.youtubeStatus == PlatformUploadStatus.uploading
+          ? PlatformUploadStatus.failed
+          : null,
+      instagramStatus: upload.instagramStatus == PlatformUploadStatus.uploading
+          ? PlatformUploadStatus.failed
+          : null,
+      errorMessage: error,
+      clearYoutubeUploadUri: true,
+    );
+    await _repository.logEvent(id, error, level: EventLevel.error);
+    final refreshed = await _repository.getById(id) ?? upload;
+    _emit(id, refreshed.title, 'Failed');
+    await _notifier.uploadFailed(refreshed, error);
+    await _notifyAgentFailure(refreshed, error);
   }
 
   // ---------------------------------------------------------------------------
@@ -123,7 +186,7 @@ class UploadEngine {
     );
     if (!claimed) return false; // someone else got it first
 
-    var upload = await _repository.getById(id) ?? due;
+    final upload = await _repository.getById(id) ?? due;
     final now = _clock();
     final lateBy = now.difference(upload.scheduledTime);
     await _repository.logEvent(
@@ -150,6 +213,18 @@ class UploadEngine {
       status: UploadStatus.uploading,
       uploadProgress: 0,
     );
+    await _runUploads(upload.copyWith(status: UploadStatus.uploading));
+    return true;
+  }
+
+  /// Uploads to every platform that is not finished yet, then records the
+  /// final state. Shared by the normal path and by [recoverInterrupted].
+  Future<void> _runUploads(ScheduledUpload initial) async {
+    final id = initial.id!;
+    var upload = initial;
+    if (upload.status != UploadStatus.uploading) {
+      await _repository.updateStatus(id, status: UploadStatus.uploading);
+    }
 
     AppSettings settings;
     try {
@@ -171,9 +246,18 @@ class UploadEngine {
 
     for (var index = 0; index < targets.length; index++) {
       final platform = targets[index];
+      if (_platformStatus(upload, platform) == PlatformUploadStatus.completed) {
+        // Already done before an interruption; do not upload twice.
+        await _repository.logEvent(
+          id,
+          '${platform.label} upload had already finished; skipping.',
+        );
+        continue;
+      }
       await _setPlatformStatus(id, platform, PlatformUploadStatus.uploading);
       _emit(id, upload.title, 'Uploading to ${platform.label}…', 0);
 
+      final throttle = _ProgressThrottle(progressWriteInterval, _clock);
       final outcome = await _runUploader(
         platform,
         upload,
@@ -182,6 +266,7 @@ class UploadEngine {
           final overall =
               (index + p.clamp(0.0, 1.0).toDouble()) / targets.length;
           _emit(id, upload.title, 'Uploading to ${platform.label}…', overall);
+          if (!throttle.shouldWrite(overall)) return;
           // Best effort; progress rows are not worth failing an upload over.
           _repository
               .updateStatus(id, uploadProgress: overall)
@@ -211,8 +296,16 @@ class UploadEngine {
 
     upload = await _repository.getById(id) ?? upload;
     await _finish(upload, errors: errors);
-    return true;
   }
+
+  static PlatformUploadStatus _platformStatus(
+    ScheduledUpload upload,
+    UploadPlatform platform,
+  ) => switch (platform) {
+    UploadPlatform.youtube => upload.youtubeStatus,
+    UploadPlatform.instagram => upload.instagramStatus,
+    UploadPlatform.both => throw ArgumentError('per-platform only'),
+  };
 
   Future<UploadOutcome> _runUploader(
     UploadPlatform platform,
@@ -226,12 +319,22 @@ class UploadEngine {
         'No uploader registered for ${platform.label}.',
       );
     }
+    final id = upload.id!;
     try {
       return await uploader.upload(
         upload,
         settings: settings,
         onProgress: onProgress,
-        log: (message) => _repository.logEvent(upload.id!, message),
+        log: (message) => _repository.logEvent(id, message),
+        saveSession: (session) => switch (platform) {
+          UploadPlatform.youtube => _repository.updateStatus(
+            id,
+            youtubeUploadUri: session,
+            clearYoutubeUploadUri: session == null,
+          ),
+          // Instagram (Phase 5) restarts from scratch; nothing to persist.
+          _ => Future<void>.value(),
+        },
       );
     } catch (e) {
       return UploadOutcome.failure('${platform.label} upload crashed: $e');
@@ -252,6 +355,9 @@ class UploadEngine {
       uploadProgress: succeeded ? 1 : null,
       errorMessage: errorMessage,
       clearErrorMessage: succeeded,
+      // A session is only kept while a transfer may still be resumed; after a
+      // terminal state a retry starts a fresh upload.
+      clearYoutubeUploadUri: true,
     );
     final finalState = await _repository.getById(id) ?? upload;
 
@@ -362,5 +468,30 @@ class UploadEngine {
         progress: progress,
       ),
     );
+  }
+}
+
+/// Limits how often progress is persisted (every callback would hammer
+/// SQLite), while always letting 0 % and 100 % through.
+class _ProgressThrottle {
+  _ProgressThrottle(this._interval, this._clock);
+
+  final Duration _interval;
+  final DateTime Function() _clock;
+  DateTime? _lastWrite;
+  double _lastValue = -1;
+
+  bool shouldWrite(double value) {
+    final now = _clock();
+    final last = _lastWrite;
+    final due =
+        last == null ||
+        value >= 1 ||
+        now.difference(last) >= _interval ||
+        (value - _lastValue).abs() >= 0.05;
+    if (!due) return false;
+    _lastWrite = now;
+    _lastValue = value;
+    return true;
   }
 }

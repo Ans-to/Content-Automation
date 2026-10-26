@@ -4,7 +4,7 @@ abstract final class AppConstants {
 
   // --- Storage ---------------------------------------------------------------
   static const String databaseName = 'content_automation.db';
-  static const int databaseVersion = 1;
+  static const int databaseVersion = 2;
 
   /// Sub-folder (inside the app's private documents directory) where picked
   /// videos are kept until their scheduled upload time.
@@ -18,6 +18,22 @@ abstract final class AppConstants {
 
   /// Instagram captions are limited to 2200 characters.
   static const int instagramCaptionMaxLength = 2200;
+
+  // --- YouTube upload (Phase 4) -----------------------------------------------
+  /// Resumable upload chunk size; must be a multiple of 256 KiB.
+  static const int youtubeUploadChunkSize = 4 * 1024 * 1024;
+
+  /// YouTube category used for every upload (22 = People & Blogs).
+  static const String youtubeDefaultCategoryId = '22';
+
+  /// How often an interrupted upload is resumed automatically before it is
+  /// marked as failed.
+  static const int maxUploadResumeAttempts = 3;
+
+  /// At service start an in-flight upload without progress for this long is
+  /// treated as interrupted (progress is written every few seconds while
+  /// bytes flow). The watchdog uses the longer [staleUploadTimeout].
+  static const Duration serviceStartStaleTimeout = Duration(minutes: 3);
 
   // --- Scheduling ------------------------------------------------------------
   /// A schedule must be at least this far in the future when it is saved.

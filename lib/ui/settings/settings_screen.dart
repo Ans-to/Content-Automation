@@ -6,9 +6,11 @@ import '../../services/settings_service.dart';
 import '../../state/background_provider.dart';
 import '../../state/settings_provider.dart';
 import '../../state/whatsapp_provider.dart';
+import '../../state/youtube_provider.dart';
 import '../background/background_status_screen.dart';
 import 'widgets/secret_field.dart';
 import 'widgets/whatsapp_tools.dart';
+import 'widgets/youtube_account_card.dart';
 
 /// API credentials for YouTube, Instagram, the WhatsApp agent and the tunnel.
 /// Everything typed here is written to encrypted secure storage on the phone.
@@ -77,6 +79,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final provider = Provider.of<SettingsProvider>(context);
     if (!_populated && provider.isLoaded) {
       _populate(provider.settings);
+    } else if (_populated) {
+      // The Google account is written by the sign-in flow, not by this form;
+      // keep the snapshot in sync so saving the form never wipes it.
+      final latest = provider.settings;
+      if (latest.youtubeAccountEmail != _loaded.youtubeAccountEmail ||
+          latest.youtubeChannelTitle != _loaded.youtubeChannelTitle) {
+        _loaded = _loaded.copyWith(
+          youtubeAccountEmail: latest.youtubeAccountEmail,
+          youtubeChannelTitle: latest.youtubeChannelTitle,
+        );
+      }
     }
   }
 
@@ -118,6 +131,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   AppSettings get _current => AppSettings(
     youtubeClientId: _youtubeClientId.text.trim(),
     youtubeApiKey: _youtubeApiKey.text.trim(),
+    youtubeAccountEmail: _loaded.youtubeAccountEmail,
+    youtubeChannelTitle: _loaded.youtubeChannelTitle,
     instagramAppId: _instagramAppId.text.trim(),
     instagramAccessToken: _instagramAccessToken.text.trim(),
     instagramBusinessAccountId: _instagramBusinessAccountId.text.trim(),
@@ -307,11 +322,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       children: [
                         SecretField(
                           controller: _youtubeClientId,
-                          label: 'OAuth Client ID',
+                          label: 'Web OAuth client ID',
                           hint: '1234567890-abc.apps.googleusercontent.com',
                           helper:
-                              'Android OAuth client created for package '
-                              'com.contentautomation.app + your signing SHA-1.',
+                              'Client ID of type "Web application". An Android '
+                              'client for package com.contentautomation.app + '
+                              'your signing SHA-1 must exist in the same '
+                              'project (see README).',
                           icon: Icons.badge_outlined,
                           secret: false,
                         ),
@@ -319,8 +336,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           controller: _youtubeApiKey,
                           label: 'API Key',
                           hint: 'AIza…',
-                          helper: 'Optional. Used for read-only requests.',
+                          helper: 'Optional. Not needed for uploads.',
                           icon: Icons.key_outlined,
+                        ),
+                        YouTubeAccountCard(
+                          provider: context.watch<YouTubeProvider>(),
+                          saved: _loaded,
+                          clientIdUnsaved:
+                              _youtubeClientId.text.trim() !=
+                              _loaded.youtubeClientId,
                         ),
                       ],
                     ),

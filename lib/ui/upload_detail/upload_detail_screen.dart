@@ -93,6 +93,20 @@ class _UploadDetailScreenState extends State<UploadDetailScreen> {
     );
   }
 
+  Future<void> _retryNow(ScheduledUpload upload) async {
+    final messenger = ScaffoldMessenger.of(context);
+    await context.read<ScheduleProvider>().retryNow(upload);
+    if (!mounted) return;
+    setState(_refreshAsync);
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Retrying now. Platforms that already finished are not repeated.',
+        ),
+      ),
+    );
+  }
+
   Future<void> _delete(ScheduledUpload upload) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -227,14 +241,26 @@ class _UploadDetailScreenState extends State<UploadDetailScreen> {
           if (upload.status.isTerminal)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-              child: FilledButton.tonalIcon(
-                onPressed: () => _reschedule(upload),
-                icon: const Icon(Icons.replay),
-                label: Text(
-                  upload.status == UploadStatus.failed
-                      ? 'Retry at a new time'
-                      : 'Upload again at a new time',
-                ),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (upload.status == UploadStatus.failed)
+                    FilledButton.icon(
+                      onPressed: () => _retryNow(upload),
+                      icon: const Icon(Icons.cloud_upload_outlined),
+                      label: const Text('Retry now'),
+                    ),
+                  FilledButton.tonalIcon(
+                    onPressed: () => _reschedule(upload),
+                    icon: const Icon(Icons.replay),
+                    label: Text(
+                      upload.status == UploadStatus.failed
+                          ? 'Retry at a new time'
+                          : 'Upload again at a new time',
+                    ),
+                  ),
+                ],
               ),
             ),
 

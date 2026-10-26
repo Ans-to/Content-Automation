@@ -4,11 +4,12 @@ A **local-first Android app** (Flutter) that keeps your videos on the phone and,
 at the exact scheduled time, pings you on WhatsApp and uploads them to **YouTube**
 and **Instagram** — no server, no cloud queue, your keys never leave the device.
 
-> Status: **Phase 3 of 6 complete** — project setup, local database, the
+> Status: **Phase 4 of 6 complete** — project setup, local database, the
 > Home / Add / Settings screens, the background scheduler that fires at the
-> exact time with the app closed, and the WhatsApp agent integration (alerts +
-> "Status" replies). Phases 4–6 (YouTube + Instagram uploaders, APK packaging
-> docs) follow one by one.
+> exact time with the app closed, the WhatsApp agent integration (alerts +
+> "Status" replies) and the YouTube uploader (Google Sign-In + resumable
+> Data API v3 upload with progress and resume-after-kill). Phases 5–6
+> (Instagram uploader, APK packaging docs) follow one by one.
 
 ## Build phases
 
@@ -17,7 +18,7 @@ and **Instagram** — no server, no cloud queue, your keys never leave the devic
 | 1 | Flutter project, SQLite schedule DB, Home / Add / Settings UI, secure key storage | ✅ done |
 | 2 | Background scheduler (`flutter_background_service` + `workmanager`), battery-optimisation opt-out, failure handling | ✅ done |
 | 3 | WhatsApp Agent integration (outbound alerts + "Status" replies) | ✅ done |
-| 4 | YouTube Data API v3 resumable uploader (`googleapis` + `google_sign_in`) | ⏳ |
+| 4 | YouTube Data API v3 resumable uploader (`googleapis` + `google_sign_in`) | ✅ done |
 | 5 | Instagram Graph API uploader via on-device `shelf` server + temporary tunnel | ⏳ |
 | 6 | Permissions, release APK workflow, full setup documentation | ⏳ |
 
@@ -219,9 +220,111 @@ app.listen(3000);
    reply arrives within ~30 s (or immediately via **Check inbox now**); the
    Settings section shows *Inbox last checked …* and *Last "Status" reply …*.
 3. Schedule an upload a few minutes ahead and lock the phone: you receive
-   *Time reached…* at the exact minute, and *Upload failed…* right after
-   (placeholders until Phases 4/5). "Status" answered while the service is
+   *Time reached…* at the exact minute, then *Upload completed…* (YouTube) or
+   *Upload failed…* with the reason. "Status" answered while the service is
    armed comes back within 30 s; later ones within 15 minutes.
+
+## What Phase 4 adds: the YouTube uploader
+
+At the scheduled time the engine now really uploads to YouTube:
+
+* **Sign in once, upload forever** — Settings → YouTube → *Sign in with
+  Google* runs the Google account picker + consent screen
+  (`google_sign_in` 7). The account e-mail is stored in secure storage; the
+  background service and the WorkManager watchdog refresh access tokens for
+  that account silently (no Activity needed), so uploads work hours or days
+  later with the app closed.
+* **Resumable upload protocol** (`POST …/upload/youtube/v3/videos?uploadType=resumable`
+  → session URI → 4 MiB `PUT` chunks with `Content-Range`), implemented on
+  `package:http` so the app controls retries and progress; `googleapis` is used
+  for the request/response models and the read calls (`channels.list`,
+  `videos.list`).
+* **Metadata from the schedule** — title (≤ 100 chars, `<`/`>` removed),
+  description (≤ 5000), tags (≤ 500 chars total), category 22, and
+  `status = { privacyStatus: "public", selfDeclaredMadeForKids: false }`. There is
+  **no `publishAt`**: the video is public as soon as YouTube finishes
+  processing. Every adjustment made to your text is written to the activity log.
+* **Progress in the database** — the uploader reports every 64 KiB; the engine
+  writes `upload_progress` (0..1) at most every 1.5 s, which drives the card on
+  the Home screen, the foreground-service notification and the WhatsApp
+  "Status" reply.
+* **Survives bad networks and a killed process** — network errors and 5xx
+  answers back off (2 s → 2 min), ask YouTube how many bytes it has
+  (`Content-Range: bytes */total`) and continue from there; a 401 refreshes
+  the token and retries. The session URI is stored in the new
+  `youtube_upload_uri` column (database version 2); if the process dies, the
+  next service start / watchdog pass resumes the transfer from the last byte
+  YouTube confirmed — up to 3 times — instead of failing it. Platforms that
+  already finished are not uploaded twice. Failed uploads get a **Retry now**
+  button in the details screen that redoes only the platform that failed.
+* **Readable failures** — quota exhausted (≈ 1,600 of the default 10,000 daily
+  units per upload), no YouTube channel on the account, revoked consent,
+  invalid metadata, missing file… each ends up as a clear *Failed* reason in
+  the app and in the WhatsApp failure message.
+
+### Google Cloud setup (once)
+
+1. Create a project at <https://console.cloud.google.com/> and enable
+   **YouTube Data API v3** (APIs & Services → Library).
+2. **OAuth consent screen**: External, add the scopes
+   `…/auth/youtube.upload` and `…/auth/youtube.readonly`, and add your Google
+   account as a **test user**. (While the app is in *Testing* mode Google
+   expires the grant after 7 days — just sign in again in Settings. Publishing
+   the consent screen removes that limit; for a personal app you can keep it
+   unverified and click through the "unverified app" warning.)
+3. **Credentials → Create credentials → OAuth client ID → Android**:
+   package name `com.contentautomation.app`, SHA-1 of the key your APK is
+   signed with (see below). Its ID is *not* typed anywhere — Google matches it
+   by package + signature.
+4. **Credentials → Create credentials → OAuth client ID → Web application**
+   (no redirect URIs needed). Copy this client ID: it is the **Web OAuth
+   client ID** you paste into Settings → YouTube (Google Sign-In on Android
+   uses it as the `serverClientId`).
+5. In the app: Settings → YouTube → paste the Web client ID → **Save** →
+   **Sign in with Google** → pick the channel's account → allow *Manage your
+   YouTube videos*. The section then shows the channel name and e-mail, and
+   the YouTube chip turns green.
+
+### Signing key = Google Sign-In identity
+
+Google Sign-In only works when the APK is signed with the key whose SHA-1 is
+registered in step 3, so **every APK must be signed with the same key**:
+
+* **Local builds** use `~/.android/debug.keystore` (stable per machine). Get
+  its SHA-1 with
+  `keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android`.
+* **CI builds** need a keystore in the repository secrets; otherwise every run
+  signs with a throw-away key and sign-in fails with *"could not find a
+  credential for this app"*. Create one and add it once:
+
+  ```bash
+  keytool -genkey -v -keystore upload-keystore.jks -storetype JKS \
+    -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+  base64 -w0 upload-keystore.jks        # → ANDROID_KEYSTORE_BASE64
+  ```
+
+  GitHub → repository **Settings → Secrets and variables → Actions**:
+  `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`
+  (`upload`), `ANDROID_KEY_PASSWORD`. The workflow writes `android/key.properties`
+  from them, `android/app/build.gradle.kts` picks it up, and the job summary of
+  every run prints the **SHA-1 / SHA-256 of the certificate the APK was signed
+  with** — that SHA-1 is what you register in Google Cloud. Keep the `.jks`
+  file safe; reinstalling with a differently signed APK requires uninstalling
+  first.
+
+### Testing YouTube on a phone
+
+1. Settings → YouTube: paste the Web client ID, Save, Sign in with Google.
+2. Schedule a short video 2–3 minutes ahead (platform *YouTube* only, so the
+   Instagram placeholder does not mark the run as failed), lock the phone.
+3. At the minute you get *Time reached…* on WhatsApp, the card shows the
+   progress bar filling, and the activity log ends with
+   *YouTube received all … (video id …, https://youtu.be/…)* followed by a
+   status line such as *upload uploaded, processing processing, privacy public*.
+   The video appears on the channel as soon as YouTube finishes processing.
+4. Kill the app or switch to airplane mode mid-upload to see the resume:
+   the log shows *Upload was interrupted … Resuming — attempt 1 of 3* and
+   *Resuming the YouTube upload at X MB of Y MB*.
 
 ## Project layout
 
@@ -248,7 +351,15 @@ lib/
 │   │   ├── inbox_service.dart        # poll → de-duplicate → reply (shared lock + cursor)
 │   │   ├── inbox_cursor_store.dart   # whatsapp_inbox.json + cross-isolate lock file
 │   │   └── inbox_poller.dart         # 30 s foreground polling while the app is open
-│   └── uploaders/video_uploader.dart # uploader interface + placeholders (Phases 4/5)
+│   ├── youtube/
+│   │   ├── google_auth_gateway.dart  # google_sign_in seam: interactive sign-in + silent background tokens
+│   │   ├── google_auth_client.dart   # token cache + Bearer http client (401 → refresh → retry)
+│   │   ├── resumable_upload.dart     # Google resumable upload protocol (chunks, 308/Range, backoff, resume)
+│   │   ├── youtube_metadata.dart     # schedule → snippet/status JSON within YouTube's limits
+│   │   ├── youtube_uploader.dart     # VideoUploader for YouTube (resume via stored session URI)
+│   │   ├── youtube_account_service.dart # Settings: sign in / channel name / sign out
+│   │   └── youtube_errors.dart       # Google error JSON → readable messages
+│   └── uploaders/video_uploader.dart # uploader interface + Instagram placeholder (Phase 5)
 ├── core/
 │   ├── env.dart                  # YOUR_… placeholders (String.fromEnvironment)
 │   ├── constants.dart            # limits, db name, folders
@@ -263,7 +374,7 @@ lib/
 │   ├── settings_service.dart         # AppSettings load/save/seed-from-.env
 │   ├── video_file_service.dart       # pick video, keep private copy on device
 │   └── local_notifier.dart           # "Time reached" / completed / failed notifications
-├── state/                            # ChangeNotifier providers (schedule, settings, background, whatsapp)
+├── state/                            # ChangeNotifier providers (schedule, settings, background, whatsapp, youtube)
 └── ui/
     ├── home/                         # list + cards + empty state + scheduler status row
     ├── add_upload/                   # create / edit form
@@ -281,7 +392,7 @@ tool/generate_icons.py                # regenerates launcher icons (no Pillow ne
 
 | Permission | Why |
 | ---------- | --- |
-| `INTERNET` | uploads / WhatsApp agent (Phases 3–5) |
+| `INTERNET` | YouTube uploads, WhatsApp agent (Instagram follows in Phase 5) |
 | `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_SPECIAL_USE` | the scheduler service that runs at the due time |
 | `WAKE_LOCK` | keep the CPU on during the countdown / upload |
 | `RECEIVE_BOOT_COMPLETED` | re-arm the schedule after a reboot |
@@ -298,9 +409,10 @@ folder when it is picked (Phase 1).
    on every item (on Xiaomi/Oppo/Vivo also enable *Auto-start*).
 2. Schedule a video 3–4 minutes ahead, press Home and lock the phone.
 3. About 2 minutes before the time an "armed" notification appears; at the
-   exact minute you get **"Time reached"** followed by **"Upload failed"**
-   (placeholders until Phases 4/5) — the upload shows as *Failed* with the
-   reason in its activity log, and the service disappears again.
+   exact minute you get **"Time reached"** and the YouTube upload starts
+   (Instagram is still a placeholder until Phase 5, so a *both* schedule ends
+   as *Failed* with the Instagram reason in its activity log while the YouTube
+   part completes).
 
 ## Running it
 
@@ -333,9 +445,8 @@ flutter build apk --release --dart-define-from-file=.env
 
 Any value still equal to its `YOUR_…` placeholder is ignored. Seeded values only
 fill fields that are still empty on the phone and can be changed in Settings.
-Full instructions for obtaining each key (Google Cloud Console, Meta Developer
-App, ngrok) arrive with Phase 6; the WhatsApp agent contract is documented
-above.
+Google Cloud setup is described under Phase 4 and the WhatsApp agent contract
+under Phase 3; Meta Developer App and ngrok instructions arrive with Phases 5/6.
 
 ## Data model
 
@@ -343,8 +454,10 @@ above.
 `description`, `tags` (comma-separated), `scheduled_time` (epoch ms), `status`
 (`scheduled | triggered | uploading | completed | failed`), `platform`
 (`youtube | instagram | both`), `youtube_status`, `instagram_status`,
-`youtube_video_id`, `instagram_media_id`, `upload_progress`, `error_message`,
-`retry_count`, `created_at`, `updated_at`.
+`youtube_video_id`, `instagram_media_id`, `youtube_upload_uri` (resumable
+session while a YouTube transfer is in flight, v2), `upload_progress`,
+`error_message`, `retry_count` (also counts automatic resumes), `created_at`,
+`updated_at`.
 
 `upload_events`: per-upload activity log (`timestamp`, `level`, `message`),
 deleted by cascade with its upload.

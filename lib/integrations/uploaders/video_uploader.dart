@@ -8,6 +8,11 @@ typedef UploadProgressCallback = void Function(double progress);
 /// Appends a line to the upload's activity log.
 typedef UploadLogger = Future<void> Function(String message);
 
+/// Persists opaque resume data for the platform (e.g. the YouTube resumable
+/// session URI) so an interrupted upload can continue after the process was
+/// killed. `null` clears it once the transfer is finished.
+typedef UploadSessionSaver = Future<void> Function(String? session);
+
 /// Result of a single platform upload.
 class UploadOutcome {
   const UploadOutcome.success({this.remoteId})
@@ -37,11 +42,16 @@ abstract interface class VideoUploader {
   /// Implementations must not throw for expected failures; return
   /// [UploadOutcome.failure] instead. Unexpected exceptions are caught by the
   /// engine and treated as failures too.
+  ///
+  /// [saveSession] stores resume data between chunks; when the engine retries
+  /// an interrupted upload the stored value is available again through the
+  /// [ScheduledUpload] (see [ScheduledUpload.youtubeUploadUri]).
   Future<UploadOutcome> upload(
     ScheduledUpload upload, {
     required AppSettings settings,
     required UploadProgressCallback onProgress,
     required UploadLogger log,
+    required UploadSessionSaver saveSession,
   });
 }
 
@@ -54,7 +64,7 @@ class UnavailableUploader implements VideoUploader {
   @override
   final UploadPlatform platform;
 
-  /// e.g. "Phase 4".
+  /// e.g. "Phase 5".
   final String arrivesIn;
 
   @override
@@ -63,6 +73,7 @@ class UnavailableUploader implements VideoUploader {
     required AppSettings settings,
     required UploadProgressCallback onProgress,
     required UploadLogger log,
+    required UploadSessionSaver saveSession,
   }) async {
     await log(
       '${platform.label} uploader is not part of this build yet ($arrivesIn).',

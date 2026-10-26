@@ -17,8 +17,12 @@ class WatchdogTask {
     final planner = runtime.planner;
     final bridge = runtime.bridge;
 
-    await engine.recoverInterrupted();
     var plan = await planner.replan();
+    // Active uploads keep `plan.keepServiceRunning` true, so an interrupted
+    // upload makes the watchdog (re)start the service, which resumes it on
+    // start-up with the foreground-service time budget. Only when the service
+    // cannot be started is the recovery done inline (WorkManager grants ~10
+    // minutes, enough for small videos).
 
     var serviceRunning = false;
     try {
@@ -36,8 +40,8 @@ class WatchdogTask {
         debugPrint('Watchdog: service start failed: $e');
       }
       if (!started) {
-        // Last resort: do the work in this isolate (WorkManager grants ~10
-        // minutes, plenty for notifications and short uploads).
+        // Last resort: do the work in this isolate.
+        await engine.recoverInterrupted();
         await engine.processDue();
         plan = await planner.replan();
         processedInline = true;

@@ -71,16 +71,46 @@ void main() {
     expect(h.bridge.scheduledWakeup, isNull);
   });
 
-  test('recovers interrupted uploads before anything else', () async {
+  test('an interrupted upload makes the watchdog start the service', () async {
+    // The service resumes it on start-up (with the foreground time budget).
     final h = EngineHarness(now: DateTime.now());
     final created = await h.addUpload();
     await h.repository.updateStatus(created.id!, status: UploadStatus.uploading);
     h.clock.advance(const Duration(hours: 1));
 
-    await WatchdogTask(h.runtime, clock: h.clock.call).run(trigger: 'watchdog');
+    final inline = await WatchdogTask(h.runtime, clock: h.clock.call)
+        .run(trigger: 'watchdog');
 
-    expect((await h.repository.getById(created.id!))!.status, UploadStatus.failed);
-    expect(h.bridge.serviceStartRequests, 0);
+    expect(inline, isFalse);
+    expect(h.bridge.serviceStartRequests, 1);
+    expect(
+      (await h.repository.getById(created.id!))!.status,
+      UploadStatus.uploading,
+      reason: 'left for the service to resume',
+    );
+    expect(h.youtube.calls, isEmpty);
+  });
+
+  test('resumes interrupted uploads inline when the service cannot start',
+      () async {
+    final h = EngineHarness(now: DateTime.now());
+    h.bridge.canStartService = false;
+    final created = await h.addUpload();
+    await h.repository.updateStatus(
+      created.id!,
+      status: UploadStatus.uploading,
+      youtubeStatus: PlatformUploadStatus.uploading,
+    );
+    h.clock.advance(const Duration(hours: 1));
+
+    final inline = await WatchdogTask(h.runtime, clock: h.clock.call)
+        .run(trigger: 'watchdog');
+
+    expect(inline, isTrue);
+    final upload = (await h.repository.getById(created.id!))!;
+    expect(upload.status, UploadStatus.completed);
+    expect(upload.retryCount, 1);
+    expect(h.youtube.calls, hasLength(1));
   });
 
   test('answers pending WhatsApp "Status" messages on the way', () async {

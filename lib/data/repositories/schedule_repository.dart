@@ -49,6 +49,8 @@ abstract interface class ScheduleRepository {
     double? uploadProgress,
     String? youtubeVideoId,
     String? instagramMediaId,
+    String? youtubeUploadUri,
+    bool clearYoutubeUploadUri = false,
     String? errorMessage,
     bool clearErrorMessage = false,
     bool incrementRetryCount = false,
@@ -222,6 +224,8 @@ class SqliteScheduleRepository implements ScheduleRepository {
     double? uploadProgress,
     String? youtubeVideoId,
     String? instagramMediaId,
+    String? youtubeUploadUri,
+    bool clearYoutubeUploadUri = false,
     String? errorMessage,
     bool clearErrorMessage = false,
     bool incrementRetryCount = false,
@@ -237,6 +241,10 @@ class SqliteScheduleRepository implements ScheduleRepository {
         UploadColumns.uploadProgress: uploadProgress.clamp(0.0, 1.0),
       UploadColumns.youtubeVideoId: ?youtubeVideoId,
       UploadColumns.instagramMediaId: ?instagramMediaId,
+      if (clearYoutubeUploadUri)
+        UploadColumns.youtubeUploadUri: null
+      else
+        UploadColumns.youtubeUploadUri: ?youtubeUploadUri,
       if (clearErrorMessage)
         UploadColumns.errorMessage: null
       else

@@ -89,6 +89,7 @@ CREATE TABLE ${UploadColumns.table} (
   ${UploadColumns.instagramStatus} TEXT NOT NULL DEFAULT 'pending',
   ${UploadColumns.youtubeVideoId} TEXT,
   ${UploadColumns.instagramMediaId} TEXT,
+  ${UploadColumns.youtubeUploadUri} TEXT,
   ${UploadColumns.uploadProgress} REAL NOT NULL DEFAULT 0,
   ${UploadColumns.errorMessage} TEXT,
   ${UploadColumns.retryCount} INTEGER NOT NULL DEFAULT 0,
@@ -129,7 +130,11 @@ CREATE TABLE ${EventColumns.table} (
   /// Incremental migrations. Add an entry for every new
   /// [AppConstants.databaseVersion]; each list runs inside the upgrade.
   static const Map<int, List<String>> _migrations = {
-    // 2: ['ALTER TABLE scheduled_uploads ADD COLUMN example TEXT'],
+    // Phase 4: resumable YouTube upload session.
+    2: [
+      'ALTER TABLE ${UploadColumns.table} '
+          'ADD COLUMN ${UploadColumns.youtubeUploadUri} TEXT',
+    ],
   };
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {

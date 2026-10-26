@@ -9,6 +9,8 @@ import '../integrations/whatsapp/inbox_cursor_store.dart';
 import '../integrations/whatsapp/inbox_service.dart';
 import '../integrations/whatsapp/whatsapp_agent.dart';
 import '../integrations/whatsapp/whatsapp_client.dart';
+import '../integrations/youtube/google_auth_gateway.dart';
+import '../integrations/youtube/youtube_uploader.dart';
 import '../services/local_notifier.dart';
 import '../services/settings_service.dart';
 import 'scheduler_status.dart';
@@ -71,12 +73,12 @@ class BackgroundRuntime {
     );
   }
 
-  static Map<UploadPlatform, VideoUploader> defaultUploaders() => const {
-    UploadPlatform.youtube: UnavailableUploader(
-      UploadPlatform.youtube,
-      arrivesIn: 'Phase 4',
-    ),
-    UploadPlatform.instagram: UnavailableUploader(
+  /// The real uploaders. Each background isolate gets its own Google Sign-In
+  /// gateway; tokens are refreshed silently for the account stored in
+  /// Settings (no Activity needed).
+  static Map<UploadPlatform, VideoUploader> defaultUploaders() => {
+    UploadPlatform.youtube: YouTubeUploader(auth: GoogleSignInGateway()),
+    UploadPlatform.instagram: const UnavailableUploader(
       UploadPlatform.instagram,
       arrivesIn: 'Phase 5',
     ),

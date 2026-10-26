@@ -65,9 +65,13 @@ class SchedulerServiceSession {
     );
 
     try {
-      final recovered = await runtime.engine.recoverInterrupted();
+      // A freshly started process cannot have an upload in flight, so a
+      // short window is enough to spot one left behind by a killed process.
+      final recovered = await runtime.engine.recoverInterrupted(
+        staleAfter: AppConstants.serviceStartStaleTimeout,
+      );
       if (recovered > 0) {
-        debugPrint('Scheduler: marked $recovered interrupted upload(s) failed');
+        debugPrint('Scheduler: handled $recovered interrupted upload(s)');
       }
     } catch (e) {
       debugPrint('Scheduler: recovery failed: $e');

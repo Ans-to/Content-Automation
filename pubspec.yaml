@@ -34,7 +34,14 @@ dependencies:
   uuid: ^4.0.0 # unique file names for persisted video copies
 
   # --- Networking --------------------------------------------------------------
-  http: ^1.2.0 # WhatsApp agent client (Phase 3), API calls in later phases
+  http: ^1.2.0 # WhatsApp agent client (Phase 3), YouTube resumable upload (Phase 4)
+
+  # YouTube (Phase 4): Google Sign-In for OAuth, googleapis for the Data API
+  # models / read calls. The platform interface is used directly from the
+  # background isolates (silent token refresh without an Activity).
+  google_sign_in: ^7.2.0
+  google_sign_in_platform_interface: ^3.1.0
+  googleapis: ^17.0.0
 
   # --- Background execution (Phase 2) ----------------------------------------
   # Foreground service that fires uploads at the exact scheduled time.

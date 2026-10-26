@@ -74,10 +74,7 @@ class InboundMessage {
       }
     }
     if (list is! List) return const [];
-    return [
-      for (final entry in list)
-        if (tryParse(entry) case final message?) message,
-    ];
+    return [for (final entry in list) ?tryParse(entry)];
   }
 
   static DateTime? parseTimestamp(Object? raw) {

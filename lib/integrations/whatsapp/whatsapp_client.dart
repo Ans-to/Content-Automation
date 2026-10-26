@@ -97,8 +97,11 @@ class WhatsAppAgentConfig {
 
   static Uri _withMessagesPath(Uri base) {
     final segments = base.pathSegments.where((s) => s.isNotEmpty).toList();
-    if (segments.isNotEmpty && segments.last == 'messages') return base;
-    return base.replace(pathSegments: [...segments, 'messages']);
+    final alreadyThere = segments.isNotEmpty && segments.last == 'messages';
+    // `replace` also normalises a trailing slash away.
+    return base.replace(
+      pathSegments: alreadyThere ? segments : [...segments, 'messages'],
+    );
   }
 }
 

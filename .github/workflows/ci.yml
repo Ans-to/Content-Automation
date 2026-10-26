@@ -43,7 +43,10 @@ jobs:
         run: flutter --version | tee versions.log
 
       - name: Resolve dependencies
-        run: flutter pub get 2>&1 | tee pubget.log
+        run: |
+          flutter pub get 2>&1 | tee pubget.log
+          # The app-local plugin is analysed as its own package context.
+          (cd packages/platform_bridge && flutter pub get) 2>&1 | tee -a pubget.log
 
       # Analyzer lines are also re-emitted as GitHub annotations so they show up
       # inline on the commit / PR diff.

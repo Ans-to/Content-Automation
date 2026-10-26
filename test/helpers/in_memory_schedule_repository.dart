@@ -47,6 +47,23 @@ class InMemoryScheduleRepository implements ScheduleRepository {
   }
 
   @override
+  Future<List<ScheduledUpload>> getActive() async => (await getAll())
+      .where((u) => u.status.isActive)
+      .toList();
+
+  @override
+  Future<bool> claim(
+    int id, {
+    required UploadStatus from,
+    required UploadStatus to,
+  }) async {
+    final current = _uploads[id];
+    if (current == null || current.status != from) return false;
+    _uploads[id] = current.copyWith(status: to, updatedAt: DateTime.now());
+    return true;
+  }
+
+  @override
   Future<ScheduledUpload?> getNextScheduled({DateTime? now}) async {
     final reference = now ?? DateTime.now();
     for (final upload in await getAll()) {

@@ -25,4 +25,39 @@ abstract final class AppConstants {
 
   /// How often the home screen refreshes its countdown labels.
   static const Duration countdownRefreshInterval = Duration(seconds: 30);
+
+  // --- Background scheduler (Phase 2) -----------------------------------------
+  /// With exact alarms available the foreground service is woken this long
+  /// before the next due time, then counts down with a precise timer.
+  static const Duration exactWakeupLead = Duration(minutes: 2);
+
+  /// Without exact alarms the OS may deliver the wake-up late, so it is armed
+  /// much earlier and the service simply waits.
+  static const Duration inexactWakeupLead = Duration(minutes: 20);
+
+  /// WorkManager one-off fallback is requested this long before the due time
+  /// (WorkManager timing is approximate; this is a safety net, not the clock).
+  static const Duration fallbackWakeupLead = Duration(minutes: 15);
+
+  /// Periodic WorkManager watchdog (15 min is the platform minimum).
+  static const Duration watchdogInterval = Duration(minutes: 15);
+
+  /// While running, the service re-checks the queue at least this often.
+  static const Duration serviceHeartbeat = Duration(seconds: 30);
+
+  /// An upload that is "triggered"/"uploading" but has not been touched for
+  /// this long is considered interrupted (process killed) and marked failed.
+  static const Duration staleUploadTimeout = Duration(minutes: 20);
+
+  // Notification plumbing.
+  static const String schedulerChannelId = 'scheduler_status';
+  static const String eventsChannelId = 'upload_events';
+  static const int foregroundNotificationId = 1001;
+
+  /// Event notifications use `eventNotificationBase + uploadId`.
+  static const int eventNotificationBase = 5000;
+
+  // WorkManager task identifiers.
+  static const String watchdogTaskName = 'content_automation.watchdog';
+  static const String wakeupTaskName = 'content_automation.wakeup';
 }

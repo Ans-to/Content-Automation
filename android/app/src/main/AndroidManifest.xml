@@ -1,9 +1,30 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Phase 1: network access is needed for the uploaders / WhatsApp agent
-         (Phases 3-5). Background-service, foreground-service and
-         battery-optimisation permissions are added in Phase 2 / Phase 6. -->
+    <!-- Network access for the uploaders / WhatsApp agent (Phases 3-5). -->
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Phase 2: background scheduler. -->
+    <!-- Foreground service that waits for the exact scheduled time and runs the
+         uploads. "specialUse" because dataSync services are capped at 6 h/day
+         on Android 15+. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- Keeps the CPU awake while the service counts down / uploads. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Re-arm the scheduler after a reboot or an app update. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Lets the app show the system "Allow app to run in background" dialog. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Exact wake-up alarm shortly before the scheduled time
+         (SCHEDULE_EXACT_ALARM is pre-granted on Android 12/12L,
+          USE_EXACT_ALARM is granted at install on Android 13+). -->
+    <uses-permission
+        android:name="android.permission.SCHEDULE_EXACT_ALARM"
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <!-- "Time reached" / "Upload failed" notifications (Android 13+). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!--
       allowBackup is disabled on purpose: API keys are encrypted with a key held
@@ -40,6 +61,18 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- flutter_background_service's service, with the foreground-service
+             type Android 14+ requires. -->
+        <service
+            android:name="id.flutter.flutter_background_service.BackgroundService"
+            android:foregroundServiceType="specialUse"
+            android:exported="true"
+            android:stopWithTask="false"
+            tools:node="merge">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Runs the user's scheduled video uploads at the exact time they chose, including the countdown shortly before it." />
+        </service>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

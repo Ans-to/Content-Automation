@@ -3,7 +3,9 @@ import 'package:provider/provider.dart';
 
 import '../../core/theme.dart';
 import '../../services/settings_service.dart';
+import '../../state/background_provider.dart';
 import '../../state/settings_provider.dart';
+import '../background/background_status_screen.dart';
 import 'widgets/secret_field.dart';
 
 /// API credentials for YouTube, Instagram, the WhatsApp agent and the tunnel.
@@ -285,6 +287,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const SizedBox(height: 8),
                     _StatusRow(settings: current),
                     const SizedBox(height: 8),
+                    const _BackgroundLink(),
+                    const SizedBox(height: 8),
 
                     // --- YouTube ------------------------------------------------
                     _SettingsSection(
@@ -429,6 +433,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ],
                 ),
               ),
+      ),
+    );
+  }
+}
+
+/// Entry point to the background-execution checklist (battery, alarms…).
+class _BackgroundLink extends StatelessWidget {
+  const _BackgroundLink();
+
+  @override
+  Widget build(BuildContext context) {
+    final background = context.watch<BackgroundProvider>();
+    final scheme = Theme.of(context).colorScheme;
+    final issues = background.issueCount;
+    return Card(
+      margin: EdgeInsets.zero,
+      child: ListTile(
+        leading: Icon(
+          background.needsAttention
+              ? Icons.battery_alert_outlined
+              : Icons.alarm_on_outlined,
+          color: background.needsAttention ? scheme.error : scheme.primary,
+        ),
+        title: const Text('Background execution'),
+        subtitle: Text(
+          !background.isLoaded
+              ? 'Checking…'
+              : issues == 0
+              ? 'Battery optimisation, notifications and alarms are set up.'
+              : '$issues ${issues == 1 ? 'setting needs' : 'settings need'} '
+                    'attention.',
+        ),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => const BackgroundStatusScreen(),
+          ),
+        ),
       ),
     );
   }

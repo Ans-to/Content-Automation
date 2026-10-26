@@ -33,6 +33,16 @@ dependencies:
   intl: ^0.20.0 # date / time formatting
   uuid: ^4.0.0 # unique file names for persisted video copies
 
+  # --- Background execution (Phase 2) ----------------------------------------
+  # Foreground service that fires uploads at the exact scheduled time.
+  flutter_background_service: ^5.1.0
+  # Periodic watchdog + inexact fallback wake-ups.
+  workmanager: ^0.10.0
+  # App-local plugin: exact alarms, battery-optimisation request,
+  # notifications, OEM auto-start screens (see packages/platform_bridge).
+  platform_bridge:
+    path: packages/platform_bridge
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

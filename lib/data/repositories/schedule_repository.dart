@@ -32,6 +32,14 @@ abstract interface class ScheduleRepository {
   /// The earliest upload still waiting in the future (used to arm alarms).
   Future<ScheduledUpload?> getNextScheduled({DateTime? now});
 
+  /// Uploads currently being worked on ([UploadStatus.triggered] or
+  /// [UploadStatus.uploading]).
+  Future<List<ScheduledUpload>> getActive();
+
+  /// Atomically moves the upload from [from] to [to]. Returns `false` when the
+  /// row was no longer in [from] (another isolate claimed it first).
+  Future<bool> claim(int id, {required UploadStatus from, required UploadStatus to});
+
   /// Partial status update used by the scheduler and uploaders.
   Future<void> updateStatus(
     int id, {
@@ -169,6 +177,40 @@ class SqliteScheduleRepository implements ScheduleRepository {
     );
     if (rows.isEmpty) return null;
     return ScheduledUpload.fromMap(rows.first);
+  }
+
+  @override
+  Future<List<ScheduledUpload>> getActive() async {
+    final db = await _db;
+    final rows = await db.query(
+      UploadColumns.table,
+      where: '${UploadColumns.status} IN (?, ?)',
+      whereArgs: [
+        UploadStatus.triggered.dbValue,
+        UploadStatus.uploading.dbValue,
+      ],
+      orderBy: '${UploadColumns.scheduledTime} ASC, ${UploadColumns.id} ASC',
+    );
+    return rows.map(ScheduledUpload.fromMap).toList(growable: false);
+  }
+
+  @override
+  Future<bool> claim(
+    int id, {
+    required UploadStatus from,
+    required UploadStatus to,
+  }) async {
+    final db = await _db;
+    final changed = await db.update(
+      UploadColumns.table,
+      {
+        UploadColumns.status: to.dbValue,
+        UploadColumns.updatedAt: DateTime.now().millisecondsSinceEpoch,
+      },
+      where: '${UploadColumns.id} = ? AND ${UploadColumns.status} = ?',
+      whereArgs: [id, from.dbValue],
+    );
+    return changed == 1;
   }
 
   @override

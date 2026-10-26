@@ -1,6 +1,10 @@
+import 'dart:async';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 
+import '../background/background_coordinator.dart';
+import '../background/scheduler_status.dart';
 import '../core/utils/formatters.dart';
 import '../data/models/enums.dart';
 import '../data/models/scheduled_upload.dart';
@@ -13,11 +17,22 @@ class ScheduleProvider extends ChangeNotifier {
   ScheduleProvider({
     required ScheduleRepository repository,
     required VideoFileService videoFiles,
+    BackgroundController? background,
   }) : _repository = repository,
-       _videoFiles = videoFiles;
+       _videoFiles = videoFiles,
+       _background = background {
+    _statusSubscription = background?.statusStream.listen(_onSchedulerStatus);
+  }
 
   final ScheduleRepository _repository;
   final VideoFileService _videoFiles;
+  final BackgroundController? _background;
+  StreamSubscription<SchedulerStatus>? _statusSubscription;
+  SchedulerStatus? _schedulerStatus;
+  Timer? _reloadDebounce;
+
+  /// Latest status pushed by the background service (null until it reports).
+  SchedulerStatus? get schedulerStatus => _schedulerStatus;
 
   List<ScheduledUpload> _uploads = const [];
   bool _isLoading = true;
@@ -93,6 +108,7 @@ class ScheduleProvider extends ChangeNotifier {
         '(${Formatters.bytes(persisted.sizeBytes)}).',
       );
       await load();
+      await _syncBackground();
       return created;
     } catch (_) {
       // Don't leave an orphaned copy behind if the DB insert failed.
@@ -159,6 +175,7 @@ class ScheduleProvider extends ChangeNotifier {
       '(${platform.label})${persisted != null ? ', video replaced' : ''}.',
     );
     await load();
+    await _syncBackground();
     return updated;
   }
 
@@ -187,6 +204,7 @@ class ScheduleProvider extends ChangeNotifier {
       'Rescheduled for ${Formatters.dateTime(newTime)}.',
     );
     await load();
+    await _syncBackground();
   }
 
   /// Removes the schedule and its private video copy.
@@ -197,6 +215,7 @@ class ScheduleProvider extends ChangeNotifier {
     await _videoFiles.deleteManagedFile(upload.videoPath);
     _uploads = _uploads.where((u) => u.id != id).toList(growable: false);
     notifyListeners();
+    await _syncBackground();
   }
 
   Future<List<UploadEvent>> eventsFor(int uploadId) =>
@@ -204,4 +223,44 @@ class ScheduleProvider extends ChangeNotifier {
 
   Future<bool> videoExists(ScheduledUpload upload) =>
       _videoFiles.exists(upload.videoPath);
+
+  /// Tells the background layer to re-arm alarms / (re)start the service.
+  /// Never throws: a scheduling hiccup must not undo a saved upload.
+  Future<void> _syncBackground() async {
+    final background = _background;
+    if (background == null) return;
+    try {
+      await background.syncSchedule();
+    } catch (e) {
+      debugPrint('Background sync failed: $e');
+    }
+  }
+
+  void _onSchedulerStatus(SchedulerStatus status) {
+    final previous = _schedulerStatus;
+    _schedulerStatus = status;
+    // The service updates the database while it works; mirror it in the UI.
+    // Progress ticks arrive up to once per second, so coalesce the reloads.
+    final changedUpload =
+        previous?.state != status.state ||
+        previous?.activeUploadId != status.activeUploadId ||
+        previous?.message != status.message;
+    if (changedUpload) {
+      _reloadDebounce?.cancel();
+      _reloadDebounce = null;
+      unawaited(load());
+    } else {
+      _reloadDebounce ??= Timer(const Duration(seconds: 2), () {
+        _reloadDebounce = null;
+        unawaited(load());
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _statusSubscription?.cancel();
+    _reloadDebounce?.cancel();
+    super.dispose();
+  }
 }

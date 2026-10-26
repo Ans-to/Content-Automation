@@ -195,6 +195,7 @@ void main() {
         log: (message) async {
           logged.add(message);
         },
+        saveSession: (_) async {},
       );
       expect(outcome.succeeded, isFalse);
       expect(outcome.error, contains('Phase 5'));

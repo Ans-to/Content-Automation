@@ -95,7 +95,19 @@ class YouTubeMetadata {
   /// Human-readable adjustments made to the user's input.
   final List<String> warnings;
 
-  Map<String, Object?> toJson() => video.toJson();
+  /// Plain JSON (nested maps, not googleapis objects) for the session request.
+  ///
+  /// `Video.toJson()` leaves `snippet`/`status` as objects and relies on
+  /// `jsonEncode` to recurse, which is fine for the wire but awkward for
+  /// anything that wants to look at the map, so it is expanded here.
+  Map<String, Object?> toJson() {
+    final snippet = video.snippet;
+    final status = video.status;
+    return {
+      if (snippet != null) 'snippet': snippet.toJson(),
+      if (status != null) 'status': status.toJson(),
+    };
+  }
 
   String get title => video.snippet?.title ?? '';
   String get description => video.snippet?.description ?? '';

@@ -80,8 +80,12 @@ void main() {
     final fetched = await repository.getById(created.id!);
     expect(fetched!.title, 'Renamed');
     expect(fetched.tags, ['x']);
-    expect(fetched.updatedAt.isAfter(created.createdAt) ||
-        fetched.updatedAt.isAtSameMomentAs(created.createdAt), isTrue);
+    // Timestamps are persisted with millisecond precision, while the in-memory
+    // `createdAt` carries microseconds — compare at the stored precision.
+    expect(
+      fetched.updatedAt.millisecondsSinceEpoch,
+      greaterThanOrEqualTo(created.createdAt.millisecondsSinceEpoch),
+    );
   });
 
   test('update without an id throws', () async {

@@ -1,0 +1,27 @@
+name: platform_bridge
+description: >-
+  App-local Android plugin for Content Automation: exact wake-up alarms,
+  battery-optimisation / notification permissions, local notifications and
+  starting the scheduler service from any Dart isolate.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.10.0
+  flutter: ">=3.38.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.contentautomation.platform_bridge
+        pluginClass: PlatformBridgePlugin

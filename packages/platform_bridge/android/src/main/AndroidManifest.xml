@@ -1,0 +1,27 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Permissions are declared by the app manifest so they stay reviewable in one place. -->
+    <application>
+        <!-- Exact alarm → start the scheduler service. -->
+        <receiver
+            android:name=".WakeupReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
+        <!--
+            Exact alarms do not survive a reboot. After boot (or an app update)
+            the scheduler service is started once; it re-arms the alarm for the
+            next upload and stops itself again if nothing is due soon.
+        -->
+        <receiver
+            android:name=".BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

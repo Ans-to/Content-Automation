@@ -14,6 +14,9 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: write # lets the "Report" steps attach the log tail as a commit comment
+
 jobs:
   analyze-and-test:
     name: Analyze & test
@@ -32,16 +35,43 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq libsqlite3-dev
 
       - name: Flutter version
-        run: flutter --version
+        run: flutter --version | tee versions.log
 
       - name: Resolve dependencies
-        run: flutter pub get
+        run: flutter pub get 2>&1 | tee pubget.log
 
+      # Analyzer lines are also re-emitted as GitHub annotations so they show up
+      # inline on the commit / PR diff.
       - name: Analyze
-        run: flutter analyze
+        id: analyze
+        run: |
+          flutter analyze 2>&1 | tee analyze.log | sed -E \
+            's#^[[:space:]]*(info|warning|error) • (.*) • ([^ ]+):([0-9]+):([0-9]+) • (.*)$#::\1 file=\3,line=\4,col=\5,title=\6::\2#; s#^::info #::notice #'
 
       - name: Run tests
-        run: flutter test --reporter expanded
+        id: test
+        if: ${{ always() && steps.analyze.outcome != 'skipped' }}
+        run: flutter test --reporter expanded 2>&1 | tee test.log
+
+      - name: Report (commit comment with log tails)
+        if: ${{ always() && github.event_name == 'push' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          section() { # title file
+            echo "<details><summary>$1</summary>"; echo; echo '```'
+            if [ -s "$2" ]; then tail -c 20000 "$2"; else echo "(no output)"; fi
+            echo '```'; echo '</details>'; echo
+          }
+          {
+            echo "### CI – Analyze & test: analyze=${{ steps.analyze.outcome }}, test=${{ steps.test.outcome }}"
+            echo
+            section "flutter --version" versions.log
+            section "flutter pub get" pubget.log
+            section "flutter analyze" analyze.log
+            section "flutter test" test.log
+          } > comment.md
+          gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/comments" -F body=@comment.md > /dev/null
 
   build-apk:
     name: Build Android APK
@@ -72,7 +102,8 @@ jobs:
       # Release mode = the same bits you will sideload. Until Phase 6 wires a
       # real keystore it is signed with the debug key (installable on a phone).
       - name: Build release APK
-        run: flutter build apk --release
+        id: build
+        run: flutter build apk --release 2>&1 | tee build.log
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -81,3 +112,17 @@ jobs:
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Report (commit comment with build log tail)
+        if: ${{ always() && github.event_name == 'push' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "### CI – Build Android APK: ${{ steps.build.outcome }}"
+            echo
+            echo '<details><summary>flutter build apk --release</summary>'; echo; echo '```'
+            if [ -s build.log ]; then tail -c 30000 build.log; else echo "(no output)"; fi
+            echo '```'; echo '</details>'
+          } > comment.md
+          gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/comments" -F body=@comment.md > /dev/null

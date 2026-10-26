@@ -1,0 +1,47 @@
+name: content_automation
+description: >-
+  Local-first Android app that schedules videos stored on the device and, at the
+  exact scheduled time, notifies you over WhatsApp and uploads them to YouTube
+  and Instagram.
+publish_to: "none"
+
+# versionName+versionCode used by Android (flutter.versionName / flutter.versionCode)
+version: 0.1.0+1
+
+environment:
+  # Phase 1 targets the current Flutter stable channel (3.47 / Dart 3.11 at the
+  # time of writing). file_picker >= 12 requires Flutter >= 3.38.
+  sdk: ^3.10.0
+  flutter: ">=3.38.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # --- Local persistence ------------------------------------------------------
+  sqflite: ^2.4.0 # SQLite database for the upload schedule
+  path_provider: ^2.1.0 # app-private directories (video copies, db path)
+  path: ^1.9.0
+
+  # --- Secrets ----------------------------------------------------------------
+  # API keys / tokens are stored encrypted on-device (Android Keystore-backed).
+  flutter_secure_storage: ">=10.0.0 <12.0.0"
+
+  # --- UI / utilities ---------------------------------------------------------
+  file_picker: ">=12.2.0 <14.0.0" # native video picker (federated v12+ API)
+  provider: ^6.1.0 # lightweight state management
+  intl: ^0.20.0 # date / time formatting
+  uuid: ^4.0.0 # unique file names for persisted video copies
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  # Lets the repository tests run against a real SQLite engine on the host VM.
+  sqflite_common_ffi: ^2.3.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/icon/app_icon.png

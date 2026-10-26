@@ -193,11 +193,12 @@ class SqliteScheduleRepository implements ScheduleRepository {
         UploadColumns.instagramStatus: instagramStatus.dbValue,
       if (uploadProgress != null)
         UploadColumns.uploadProgress: uploadProgress.clamp(0.0, 1.0),
-      if (youtubeVideoId != null) UploadColumns.youtubeVideoId: youtubeVideoId,
-      if (instagramMediaId != null)
-        UploadColumns.instagramMediaId: instagramMediaId,
-      if (errorMessage != null) UploadColumns.errorMessage: errorMessage,
-      if (clearErrorMessage) UploadColumns.errorMessage: null,
+      UploadColumns.youtubeVideoId: ?youtubeVideoId,
+      UploadColumns.instagramMediaId: ?instagramMediaId,
+      if (clearErrorMessage)
+        UploadColumns.errorMessage: null
+      else
+        UploadColumns.errorMessage: ?errorMessage,
     };
 
     final db = await _db;

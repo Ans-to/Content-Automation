@@ -230,7 +230,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       onPopInvokedWithResult: (didPop, _) async {
         if (didPop) return;
         final discard = await _confirmDiscard();
-        if (discard && mounted) Navigator.of(context).pop();
+        if (!discard || !mounted) return;
+        Navigator.of(this.context).pop();
       },
       child: Scaffold(
         appBar: AppBar(

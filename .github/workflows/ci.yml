@@ -17,6 +17,11 @@ concurrency:
 permissions:
   contents: write # lets the "Report" steps attach the log tail as a commit comment
 
+defaults:
+  run:
+    # Explicit bash => `-eo pipefail`, so `flutter … | tee` keeps flutter's exit code.
+    shell: bash
+
 jobs:
   analyze-and-test:
     name: Analyze & test

@@ -567,7 +567,7 @@ class _VideoTile extends StatelessWidget {
         subtitle: Text(
           [
             if (size != null && size > 0) Formatters.bytes(size),
-            if (caption != null) caption,
+            ?caption,
           ].join(' · '),
         ),
         trailing: TextButton(
